@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",            // modern ES modules for bundlers like Vite
+    "jsx": "react-jsx",            // React JSX
+    "strict": true,
+    "esModuleInterop": true,
+    "outDir": "dist/renderer",
+    "moduleResolution": "node",
+    "sourceMap": false,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,     // <-- helps ignore the node/electron typing conflicts
+
+  },
+  "include": ["src/**/*"]
+}

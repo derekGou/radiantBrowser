@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",            // modern JS
+    "module": "commonjs",                 // modern ES modules for bundlers like Vite
+    "jsx": "react-jsx",     // Node/Electron main process
+    "strict": true,
+    "esModuleInterop": true,
+    "outDir": "dist/main",
+    "moduleResolution": "node",
+    "sourceMap": false,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+  },
+  "include": ["src/**/*"]
+}

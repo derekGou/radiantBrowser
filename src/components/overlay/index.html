@@ -1,0 +1,1244 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Overlay</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: transparent;
+            -webkit-app-region: no-drag;
+        }
+
+        /* Layer 1: Input capture (invisible, captures all input) */
+        #input-capture {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            background: transparent;
+        }
+
+        /* Layer 2: Suggestions */
+        #suggestions-container-container {
+            position: fixed;
+            top: 2.375rem;
+            left: 0;
+            z-index: 2;
+            width: 100vw;
+            padding: 2.75rem 1.85rem 0 10.45rem;
+        }
+        #suggestions-container {
+            width: 100%;
+            background: #1a1a1a;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+            overflow: hidden;
+            display: none; /* Hidden by default */
+            pointer-events: auto; /* Allow interaction */
+        }
+
+        #suggestions {
+            list-style: none;
+        }
+
+        .suggestion-item {
+            padding: 10px 16px;
+            cursor: default;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            border-bottom: 1px solid #333;
+            transition: background-color 0.1s;
+        }
+
+        .suggestion-item:hover,
+        .suggestion-item.selected {
+            background: #333;
+        }
+
+        .suggestion-content {
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .suggestion-title {
+            font-size: 14px;
+            color: white;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .suggestion-subtitle {
+            font-size: 12px;
+            color: #999;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-top: 2px;
+        }
+
+        .type-badge {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            background: #444;
+            color: #aaa;
+        }
+
+        /* Layer 3: Window controls */
+        .window-controls {
+            position: fixed;
+            top: 0;
+            right: 12px;
+            width: 96px;
+            height: 38px;
+            display: flex;
+            flex-direction: row;
+            z-index: 3;
+            pointer-events: auto; /* Allow interaction */
+        }
+
+        .control-btn {
+            width: 32px;
+            height: 38px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .btn-surface {
+            width: 26px;
+            height: 26px;
+            cursor: pointer;
+        }
+
+        /* Layer 4: Crosshair (highest, always visible) */
+        #crosshair-canvas {
+            position: fixed;
+            z-index: 4;
+            pointer-events: none; /* Never block interaction */
+            will-change: transform; /* GPU optimization */
+            display: none; /* Hidden by default */
+        }
+        
+        #searchbar-placement {
+            position: fixed;
+            top: 2.375rem;
+            height: 3.625rem;
+            left: 0;
+            width: 100vw;
+            border-bottom: 2px solid transparent;
+            padding: 2px;
+            padding-left: 9.6rem;
+            padding-right: 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            display: none;
+        }
+
+        #searchbar-out {
+            padding: 0.1rem 0.14rem;
+            background-color: #666;
+            display: flex;
+            flex-grow: 1;
+            clip-path: polygon(
+                0.85rem 0,
+                calc(100% - 0.85rem) 0,
+                100% 0.85rem,
+                calc(100% - 0.85rem) 100%,
+                0.85rem 100%,
+                0 calc(100% - 0.85rem)
+            );
+            -webkit-clip-path: polygon(
+                0.85rem 0,
+                calc(100% - 0.85rem) 0,
+                100% 0.85rem,
+                calc(100% - 0.85rem) 100%,
+                0.85rem 100%,
+                0 calc(100% - 0.85rem)
+            );
+        }
+
+        #searchbar-out:focus-within {
+            background-color: #ff4654;
+        }
+
+        #searchbar-in {
+            height: 1.5rem;
+            background-color: #06070D;
+            display: flex;
+            flex-grow: 1;
+            padding: 0 1rem;
+            clip-path: polygon(
+                0.75rem 0,
+                calc(100% - 0.75rem) 0,
+                100% 0.75rem,
+                calc(100% - 0.75rem) 100%,
+                0.75rem 100%,
+                0 calc(100% - 0.75rem)
+            );
+            -webkit-clip-path: polygon(
+                0.75rem 0,
+                calc(100% - 0.75rem) 0,
+                100% 0.75rem,
+                calc(100% - 0.75rem) 100%,
+                0.75rem 100%,
+                0 calc(100% - 0.75rem)
+            );
+        }
+
+        #searchbar-form {
+            height: 100%;
+            width: 100%;
+            display: flex;
+            flex-grow: 1;
+        }
+
+        #searchbar-form:focus-within {
+            background-color: #333;
+        }
+
+        #searchbar {
+            flex-grow: 1;
+            color: white;
+            background-color: #06070D;
+            border: none;
+            outline: none;
+        }
+
+        #searchbar:focus {
+            outline: none;
+            box-shadow: none;
+            border: none;
+        }
+
+        #input-container-screen {
+            position: fixed;
+            display: none;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 5;
+            pointer-events: none;
+        }
+
+        #input-box-form {
+            position: fixed;
+            pointer-events: auto;
+        }
+        
+        #input-box {
+            color: white;
+            background-color: #06070D;
+            border: 2px solid #333;
+            outline: none;
+            padding: 0.5rem;
+            font-family: inherit;
+            font-size: inherit;
+        }
+    </style>
+</head>
+<body>
+    <!-- Layer 1: Input capture (invisible background) -->
+    <div id="input-capture"></div>
+
+    <div id="input-container-screen">
+        <form id="input-box-form">
+            <input id="input-box">
+        </form>
+    </div>
+
+    <!-- Layer 2: Suggestions -->
+    <div id="suggestions-container-container">
+        <div id="suggestions-container">
+            <ul id="suggestions"></ul>
+        </div>
+    </div>
+
+    <!-- Layer 3: Window controls -->
+    <div class="window-controls">
+        <div class="control-btn">
+            <div class="btn-surface" id="maximize-btn"></div>
+        </div>
+        <div class="control-btn">
+            <div class="btn-surface" id="minimize-btn"></div>
+        </div>
+        <div class="control-btn">
+            <div class="btn-surface" id="close-btn"></div>
+        </div>
+    </div>
+
+    <div id="searchbar-placement">
+        <div id="searchbar-out">
+            <div id="searchbar-in">
+                <form id="searchbar-form">
+                    <input 
+                        id="searchbar"
+                        placeholder="Search Google or type a URL"
+                    >
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Layer 4: Crosshair -->
+    <canvas id="crosshair-canvas" width="200" height="200"></canvas>
+
+    <script>
+        // ============================
+        // CUSTOM INPUT
+        // ============================
+        console.log('Text input API available:', !!window.textInput);
+        console.log('Text input methods:', window.textInput ? Object.keys(window.textInput) : 'N/A');
+
+        let textInputData = null;
+        let isTextInputActive = false;
+        let justClosedTextInput = false;
+        let isSettingsActive = false;
+        let blurTimeout = null;
+        const inputBox = document.getElementById("input-box");
+        const inputBoxForm = document.getElementById("input-box-form");
+        const inputContainerScreen = document.getElementById("input-container-screen");
+        const currentMargins = { top: 0, right: 0, bottom: 0, left: 0 };
+
+        // Listen for settings active state changes
+        window.electronAPI?.onCustomCursorEnabled?.((_enabled) => {
+            // This will be called when cursor is enabled/disabled
+        });
+
+        const applyInputStyles = (style) => {
+            if (!style) return;
+
+            inputBox.style.cssText = '';
+            currentMargins.top = 0;
+            currentMargins.right = 0;
+            currentMargins.bottom = 0;
+            currentMargins.left = 0;
+
+            Object.keys(style).forEach((prop) => {
+                const value = style[prop];
+                if (value === null || value === undefined || value === '') return;
+                // Skip opacity - keep overlay input visible
+                if (prop === 'opacity') return;
+                if (prop === 'margin' || prop.startsWith('margin-') || prop.startsWith('margin')) {
+                    inputBox.style.setProperty(prop, value);
+                    if (prop === 'margin-top') currentMargins.top = parseFloat(value) || 0;
+                    if (prop === 'margin-right') currentMargins.right = parseFloat(value) || 0;
+                    if (prop === 'margin-bottom') currentMargins.bottom = parseFloat(value) || 0;
+                    if (prop === 'margin-left') currentMargins.left = parseFloat(value) || 0;
+                    return;
+                }
+                inputBox.style.setProperty(prop, value);
+            });
+        };
+
+
+        const setInputBox = (left, top, width, height, value, style, type) => {
+            isTextInputActive = true;
+            inputContainerScreen.style.display = "flex";
+            inputBox.value = value || "";
+            
+            if (type) {
+                inputBox.type = type;
+            } else {
+                inputBox.type = "text";
+            }
+            
+            // Apply styles from the renderer input
+            applyInputStyles(style);
+
+            // Ensure overlay input is always visible
+            inputBox.style.opacity = '1';
+
+            const adjustedLeft = left - currentMargins.left;
+            const adjustedTop = top - currentMargins.top;
+            inputBoxForm.style.left = adjustedLeft + 'px';
+            inputBoxForm.style.top = adjustedTop + 'px';
+            
+            inputBox.focus();
+        };
+
+        const closeInputBox = () => {
+            if (!isTextInputActive) return; // Prevent multiple calls
+            
+            console.log('Text input overlay closing');
+            isTextInputActive = false;
+            justClosedTextInput = true;
+            
+            // Reset flag after a brief moment to allow normal clicks again
+            setTimeout(() => {
+                justClosedTextInput = false;
+            }, 50);
+            
+            inputContainerScreen.style.display = "none";
+            textInputData = null;
+            
+            // Clear any pending blur timeout
+            if (blurTimeout) {
+                clearTimeout(blurTimeout);
+                blurTimeout = null;
+            }
+            
+            // Only send deactivate once
+            if (window.textInput?.deactivate) {
+                window.textInput.deactivate();
+            }
+        };
+
+        inputBox.addEventListener('blur', () => {
+            if (blurTimeout) clearTimeout(blurTimeout);
+            
+            console.log('Overlay input blurred, committing:', inputBox.value);
+            
+            // Commit and close on blur (no submit)
+            if (window.textInput && isTextInputActive) {
+                window.textInput.commitValue(inputBox.value);
+                closeInputBox();
+            }
+        });
+
+        inputBox.addEventListener('focus', () => {
+            // Cancel blur timeout if refocused
+            if (blurTimeout) {
+                clearTimeout(blurTimeout);
+                blurTimeout = null;
+            }
+        });
+
+        inputBox.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                // Clear blur timeout to prevent double-close
+                if (blurTimeout) {
+                    clearTimeout(blurTimeout);
+                    blurTimeout = null;
+                }
+                // Commit and submit on Enter
+                if (textInputData && window.textInput && isTextInputActive) {
+                    window.textInput.commitValue(inputBox.value);
+                    window.textInput.submitForm();
+                }
+                closeInputBox();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                // Clear blur timeout to prevent double-close
+                if (blurTimeout) {
+                    clearTimeout(blurTimeout);
+                    blurTimeout = null;
+                }
+                                closeInputBox();
+            }
+        });
+
+        inputBox.addEventListener('input', () => {
+            if (window.textInput && isTextInputActive) {
+                window.textInput.commitValue(inputBox.value);
+            }
+        });
+
+        inputBoxForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            // Clear blur timeout to prevent double-close
+            if (blurTimeout) {
+                clearTimeout(blurTimeout);
+                blurTimeout = null;
+            }
+                        // Commit the value and submit
+            if (textInputData && window.textInput && isTextInputActive) {
+                console.log("commiting")
+                window.textInput.commitValue(inputBox.value);
+                window.textInput.submitForm();
+            }
+            closeInputBox();
+        });
+
+        // Listen for text input show
+        if (window.textInput?.onShow) {
+            window.textInput.onShow((data) => {
+                console.log('Text input overlay show:', data);
+                textInputData = data;
+                
+                // Position and size the overlay
+                setInputBox(data.x, data.y, data.width, data.height, data.value, data.style, data.type);
+            });
+        }
+
+        // Listen for text input hide
+        if (window.textInput?.onHide) {
+            window.textInput.onHide(() => {
+                console.log('Text input overlay hide');
+                closeInputBox();
+            });
+        }
+
+        // Do not commit on every keystroke.
+
+        // ============================
+        // SEARCHBAR & OMNIBOX LOGIC
+        // ============================
+        const inputRef = document.getElementById("searchbar");
+        const holder = document.getElementById("searchbar-placement");
+        const form = document.getElementById("searchbar-form");
+
+        // Proper state management
+        let isEditing = false;
+        let activeUrl = "";
+        let inputValue = "";
+        let queryValue = "";
+        let suppressQuery = false;
+        let suggestions = [];
+        let selected = -1;
+
+        inputRef.value = inputValue;
+
+        // Debounce timer
+        let debounceTimer = null;
+
+        const setIsEditing = (val) => {
+            isEditing = val;
+            if (!isEditing) {
+                // When exiting edit mode, restore the active URL
+                inputRef.value = activeUrl;
+                inputValue = activeUrl;
+            }
+            debounceQuery();
+            hideSuggestions();
+            onQueryValue();
+        };
+
+        const setActiveUrl = (val) => {
+            activeUrl = val;
+            onActiveUrl();
+        };
+
+        const setInputValue = (val) => {
+            inputValue = val;
+            inputRef.value = val;
+            debounceQuery();
+        };
+
+        const setQueryValue = (val) => {
+            queryValue = val;
+            onQueryValue();
+        };
+
+        const setSuppressQuery = (val) => {
+            suppressQuery = val;
+            debounceQuery();
+        };
+
+        const setSuggestions = (val) => {
+            suggestions = val;
+            onSelected();
+        };
+
+        const setSelected = (val) => {
+            if (typeof val === 'function') {
+                selected = val(selected);
+            } else {
+                selected = val;
+            }
+            onSelected();
+        };
+
+        // Function to update URL from tabs
+        const updateActiveUrlFromTabs = async () => {
+            try {
+                const tabs = await window.tabs.get();
+                const active = tabs.find(t => t.active);
+                if (active?.url) {
+                    setActiveUrl(active.url);
+                }
+            } catch (error) {
+                console.error('Error getting tabs:', error);
+            }
+        };
+
+        document.addEventListener("blur", function(){
+            isEnabled = false;
+            hasUserGesture = false;
+        });
+
+        const init = () => {
+            console.log('Init called');
+            console.log('window.tabs available:', !!window.tabs);
+            console.log('window.tabs.onUpdate:', typeof window.tabs?.onUpdate);
+            
+            onActiveUrl();
+            debounceQuery();
+            hideSuggestions();
+            onQueryValue();
+            onSelected();
+            
+            // Initial load of active URL
+            updateActiveUrlFromTabs();
+
+            // Set up tab update listener
+            if (window.tabs?.onUpdate) {
+                console.log('Setting up onUpdate listener');
+                const unsubscribe = window.tabs.onUpdate((tabs) => {
+                    console.log('tabs:update event received!', tabs);
+                    const active = tabs.find(t => t.active);
+                    console.log('Active tab found:', active);
+                    
+                    if (active?.url) {
+                        console.log('Current activeUrl:', activeUrl, 'New URL:', active.url);
+                        if (active.url !== activeUrl) {
+                            console.log('URLs differ, updating');
+                            setActiveUrl(active.url);
+                        } else {
+                            console.log('URLs are the same, skipping update');
+                        }
+                    } else {
+                        console.log('No active tab or URL found');
+                    }
+                });
+                
+                // Store unsubscribe for cleanup if needed
+                window.tabsUnsubscribe = unsubscribe;
+                console.log('Listener setup complete');
+            } else {
+                console.warn('window.tabs.onUpdate NOT available');
+            }
+            
+            // Fallback polling in case events don't fire
+            setInterval(async () => {
+                if (!isEditing) {
+                    try {
+                        const tabs = await window.tabs.get();
+                        const active = tabs.find(t => t.active);
+                        if (active?.url && active.url !== activeUrl) {
+                            console.log('Polling detected URL change:', active.url);
+                            setActiveUrl(active.url);
+                        }
+                    } catch (error) {
+                        console.error('Error polling tabs:', error);
+                    }
+                }
+            }, 1000); // Poll every second as fallback
+        };
+
+        inputRef.addEventListener("focus", function(){
+            setIsEditing(true);
+        });
+
+        inputRef.addEventListener("blur", function(){
+            // Delay slightly to allow suggestion clicks
+            setTimeout(() => {
+                setIsEditing(false);
+            }, 200);
+        });
+
+        inputRef.addEventListener("input", (e) => {
+            setInputValue(e.target.value);
+        });
+
+        const onActiveUrl = () => {
+            // Only update input if not currently editing
+            if (!isEditing) {
+                setInputValue(activeUrl);
+                inputRef.value = activeUrl;
+            }
+            window.electron?.ipc?.send('hide-suggestions');
+        };
+
+        const handleSubmit = (e) => {
+            e.preventDefault();
+
+            const url = inputValue.trim();
+            if (!url) return;
+            
+            // Immediately hide suggestions
+            window.electron?.ipc?.send('hide-suggestions');
+            setSuggestions([]);
+            setSelected(-1);
+            setQueryValue('');
+            
+            // Navigate FIRST
+            window.tabs.navigate(url);
+            console.log('Navigating to:', url);
+            
+            // Then update UI - the tab update listener will handle setting activeUrl
+            // but we optimistically update it here too
+            setActiveUrl(url);
+            
+            setTimeout(() => {
+                window.electron?.ipc?.send('hide-suggestions');
+                setSuggestions([]);
+                setSelected(-1);
+            }, 500);
+            
+            // Exit editing and blur
+            setIsEditing(false);
+            inputRef.blur();
+        };
+
+        form.addEventListener("submit", (e) => handleSubmit(e));
+
+        const debounceQuery = () => {
+            if (debounceTimer) {
+                clearTimeout(debounceTimer);
+            }
+            
+            if (!isEditing) return;
+            
+            debounceTimer = setTimeout(() => {
+                if (suppressQuery) {
+                    return;
+                }
+                setQueryValue(inputValue);
+            }, 80);
+        };
+
+        const hideSuggestions = () => {
+            if (!isEditing) {
+                window.electron?.ipc?.send('hide-suggestions');
+            }
+        };
+
+        const onQueryValue = () => {
+            if (!isEditing) {
+                window.electron?.ipc?.send('hide-suggestions');
+                setSuggestions([]);
+                setSelected(-1);
+                setTimeout(() => {
+                    window.electron?.ipc?.send('hide-suggestions');
+                    setSuggestions([]);
+                    setSelected(-1);
+                }, 500);
+                return;
+            }
+
+            (async () => {
+                try {
+                    const results = await window.omnibox.query(queryValue);
+                    setSuggestions(results);
+                    setSelected(-1);
+
+                    if (!inputRef || results.length === 0) {
+                        window.electron?.ipc?.send('hide-suggestions');
+                        return;
+                    }
+
+                    const rect = inputRef.getBoundingClientRect();
+                    const mainWindowBounds = await window.electron?.ipc?.invoke('get-window-bounds');
+
+                    window.electron?.ipc?.send('show-suggestions');
+                    window.electron?.ipc?.send('update-suggestions', results);
+                } catch (error) {
+                    console.error('Error querying omnibox:', error);
+                }
+            })();
+        };
+
+        const onKeyDown = (e) => {
+            if (e.key === 'ArrowDown') {
+                if (suggestions.length === 0) return;
+                if (selected >= suggestions.length - 1) {
+                    setSelected(0);
+                } else if (selected === -1) {
+                    setSelected(0);
+                } else {
+                    setSelected(s => s + 1);
+                }
+                e.preventDefault();
+            } else if (e.key === 'ArrowUp') {
+                if (suggestions.length === 0) return;
+                if (selected <= 0) {
+                    setSelected(suggestions.length - 1);
+                } else {
+                    setSelected(s => s - 1);
+                }
+                e.preventDefault();
+            } else if (e.key === 'Enter' && selected >= 0 && selected < suggestions.length) {
+                // Handle Enter on selected suggestion
+                e.preventDefault();
+                const suggestion = suggestions[selected];
+                setInputValue(suggestion.value);
+                // Trigger submit
+                form.dispatchEvent(new Event('submit'));
+            } else {
+                setSuppressQuery(false);
+            }
+        };
+
+        inputRef.addEventListener("keydown", (e) => onKeyDown(e));
+
+        const onSelected = () => {
+            if (suggestions.length === 0) return;
+            if (selected < 0 || selected >= suggestions.length) return;
+
+            // Apply the suggestion to the displayed input but suppress the
+            // next automatic query so suggestions don't immediately refresh.
+            setInputValue(suggestions[selected].value);
+            setSuppressQuery(true);
+            
+            // Update visual selection
+            renderSuggestions();
+        };
+
+        // Add this function to update suggestion styling
+        const renderSuggestions = () => {
+            const items = suggestionsList.querySelectorAll('.suggestion-item');
+            items.forEach((item, index) => {
+                if (index === selected) {
+                    item.classList.add('selected');
+                } else {
+                    item.classList.remove('selected');
+                }
+            });
+        };
+
+        init();
+
+        // ============================
+        // CROSSHAIR LOGIC
+        // ============================
+        const SIZE = 200;
+        const HALF = SIZE / 2;
+        const canvas = document.getElementById("crosshair-canvas");
+        const ctx = canvas.getContext("2d", { alpha: true });
+
+        let crosshairSettings = {
+            version: "0",
+            color: "white",
+            outlines: { enabled: false, opacity: 0.5, thickness: 1 },
+            centerDot: { enabled: false, opacity: 1, thickness: 2 },
+            innerLines: { enabled: true, opacity: 0.8, lengthH: 6, lengthV: 6, thickness: 2, offset: 3 },
+            outerLines: { enabled: true, opacity: 0.35, lengthH: 2, lengthV: 2, thickness: 2, offset: 10 }
+        };
+
+        let crosshairPos = { x: HALF, y: HALF };
+
+        function drawCrosshair() {
+            ctx.clearRect(0, 0, SIZE, SIZE);
+            const c = crosshairSettings.color;
+
+            // Outlines
+            if (crosshairSettings.outlines.enabled) {
+                ctx.globalAlpha = crosshairSettings.outlines.opacity;
+                ctx.lineWidth = crosshairSettings.outlines.thickness;
+                ctx.strokeStyle = c;
+                ctx.strokeRect(0, 0, SIZE, SIZE);
+            }
+
+            // Center dot
+            if (crosshairSettings.centerDot.enabled) {
+                ctx.globalAlpha = crosshairSettings.centerDot.opacity;
+                const t = crosshairSettings.centerDot.thickness;
+                ctx.fillStyle = c;
+                ctx.fillRect(HALF - t / 2, HALF - t / 2, t, t);
+            }
+
+            // Draw line sets
+            drawLineSet(crosshairSettings.innerLines);
+            drawLineSet(crosshairSettings.outerLines);
+
+            ctx.globalAlpha = 1;
+        }
+
+        function drawLineSet(cfg) {
+            if (!cfg.enabled) return;
+
+            ctx.globalAlpha = cfg.opacity;
+            ctx.lineWidth = cfg.thickness;
+            ctx.strokeStyle = crosshairSettings.color;
+
+            const { lengthH, lengthV, offset } = cfg;
+
+            ctx.beginPath();
+
+            // Horizontal lines
+            ctx.moveTo(HALF - offset - lengthH, HALF);
+            ctx.lineTo(HALF - offset, HALF);
+            ctx.moveTo(HALF + offset, HALF);
+            ctx.lineTo(HALF + offset + lengthH, HALF);
+
+            // Vertical lines
+            ctx.moveTo(HALF, HALF - offset - lengthV);
+            ctx.lineTo(HALF, HALF - offset);
+            ctx.moveTo(HALF, HALF + offset);
+            ctx.lineTo(HALF, HALF + offset + lengthV);
+
+            ctx.stroke();
+        }
+
+        drawCrosshair();
+
+        // ============================
+        // INPUT CAPTURE LOGIC
+        // ============================
+
+        const inputCapture = document.getElementById("input-capture");
+        let isEnabled = false;
+        let hasUserGesture = false;
+        let suppressNextMouseUp = false;
+        let pointerLockExitRequested = false;
+
+        // Establish user gesture
+        const establishGesture = (e) => {
+            // Don't capture if clicking on window controls or suggestions
+            const isLocked = !!document.pointerLockElement;
+            const hitX = isLocked ? crosshairPos.x : e.clientX;
+            const hitY = isLocked ? crosshairPos.y : e.clientY;
+            const elems = document.elementsFromPoint(hitX, hitY);
+            if (elems.some(elem => elem.id == "maximize-btn") || 
+                elems.some(elem => elem.id == "minimize-btn") || 
+                elems.some(elem => elem.id == "close-btn")){
+                return;
+            }
+
+            hasUserGesture = true;
+            
+            if (!document.pointerLockElement) {
+                // Request pointer lock first
+                document.body.requestPointerLock();
+                
+                // Only toggle cursor mode if not already enabled
+                if (!isEnabled) {
+                    window.customCursor.toggle();
+                }
+            }
+        };
+        
+        document.addEventListener('click', establishGesture, { capture: true, passive: true });
+
+        // Listen for enable/disable from main process
+        window.electronAPI.onCustomCursorEnabled((enabled) => {
+            isEnabled = enabled;
+            
+            // Update cursor style
+            const cursor = enabled ? 'none' : 'auto';
+            document.documentElement.style.cursor = cursor;
+            document.body.style.cursor = cursor;
+            
+            // Show/hide crosshair canvas
+            canvas.style.display = enabled ? 'block' : 'none';
+            holder.style.display = enabled ? 'flex' : 'none';
+            
+            if (enabled) {
+                if (hasUserGesture) {
+                    // Already have user gesture, request immediately
+                    requestAnimationFrame(() => {
+                        requestAnimationFrame(() => {
+                            if (isEnabled) { // Double check still enabled
+                                document.body.requestPointerLock();
+                            }
+                        });
+                    });
+                }
+                // If no user gesture yet, establishGesture will handle it on next click
+            } else {
+                // Exit pointer lock when disabled
+                if (document.pointerLockElement) {
+                    document.exitPointerLock();
+                }
+                closeInputBox();
+                // Don't reset hasUserGesture immediately - keep it for quick re-enable
+            }
+        });
+        
+        // Listen for settings active state
+        window.addEventListener('message', (event) => {
+            if (event.data.type === 'overlay:set-settings-active') {
+                isSettingsActive = event.data.active;
+            }
+        });
+        
+        // Also listen via ipcRenderer if available
+        if (window.electronAPI && typeof window.electronAPI.onSettingsActive === 'function') {
+            window.electronAPI.onSettingsActive((active) => {
+                isSettingsActive = active;
+            });
+        }
+        
+        document.addEventListener('pointerlockchange', () => {
+            const locked = !!document.pointerLockElement;
+            
+            if (!locked && isEnabled && hasUserGesture) {
+                if (pointerLockExitRequested) {
+                    pointerLockExitRequested = false;
+                }
+                // Pointer lock was exited (Escape or OS). Disable custom cursor
+                // so the app shows the click-to-reenter screen.
+                window.customCursor.toggle();
+                return;
+            } else if (!locked){
+                document.getElementById("suggestions-container").style.display = "none";
+            }
+        });
+        
+        // Optimized mouse movement (throttled)
+        let lastMouseSend = 0;
+        const MOUSE_THROTTLE = 8; // ~120fps
+        
+        document.addEventListener('mousemove', (e) => {
+            if (!isEnabled || !document.pointerLockElement) return;
+            
+            const now = performance.now();
+            if (now - lastMouseSend >= MOUSE_THROTTLE) {
+                lastMouseSend = now;
+                window.electronAPI.sendMouseMove({
+                    movementX: e.movementX,
+                    movementY: e.movementY
+                });
+            }
+        });
+        
+        // Handle clicks and drag start
+        document.addEventListener('mousedown', (e) => {
+            // If we just closed text input, suppress this entire click
+            if (justClosedTextInput) {
+                e.preventDefault();
+                e.stopPropagation();
+                suppressNextMouseUp = true;
+                return;
+            }
+            
+            const isLocked = !!document.pointerLockElement;
+            const hitX = isLocked ? crosshairPos.x : e.clientX;
+            const hitY = isLocked ? crosshairPos.y : e.clientY;
+            const elems = document.elementsFromPoint(hitX, hitY);
+            if (elems.some(elem => elem.id == "maximize-btn")){
+                window.windowControls.maximize();
+                searchbar.blur();
+                closeInputBox();
+                return;
+            } else if (elems.some(elem => elem.id == "minimize-btn")){
+                window.windowControls.minimize();
+                searchbar.blur();
+                closeInputBox();
+                return;
+            } else if (elems.some(elem => elem.id == "close-btn")){
+                window.windowControls.close();
+                searchbar.blur();
+                closeInputBox();
+                return;
+            } else if (elems.some(elem => elem.id == "searchbar-out")){
+                e.preventDefault();
+                searchbar.focus();
+                closeInputBox();
+                return;
+            } else if (elems.some(elem => elem.id == "input-box-form")) {
+                // Don't blur or close - allow click to position caret
+                searchbar.blur();
+                return;
+            } else if (isTextInputActive) {
+                // Clicking away from active input: force blur to commit immediately,
+                // then suppress this click from reaching the main window.
+                inputBox.blur();
+                e.preventDefault();
+                e.stopPropagation();
+                suppressNextMouseUp = true;
+                searchbar.blur();
+                return;
+            } else {
+                searchbar.blur();
+                closeInputBox();
+            }
+
+            if (!isEnabled) {
+                const rect = document.body.getBoundingClientRect();
+                const clickX = e.clientX - rect.left;
+                const clickY = e.clientY - rect.top;
+                window.electronAPI.setInitialCursorPosition({ x: clickX, y: clickY });
+                return;
+            }
+            
+            // Left click - send separate mousedown event
+            if (e.button === 0) {
+                window.electronAPI.customCursorMouseDown();
+            }
+            // Right click
+            else if (e.button === 2) {
+                window.electronAPI.customCursorRightClick();
+            }
+        });
+        
+        // Handle mouse up (drag end)
+        document.addEventListener('mouseup', (e) => {
+            if (!isEnabled) return;
+            
+            // If we suppressed this click (e.g., closing text input), skip it
+            if (suppressNextMouseUp) {
+                suppressNextMouseUp = false;
+                return;
+            }
+            
+            if (e.button === 0) {
+                window.electronAPI.customCursorMouseUp();
+            }
+        });
+                
+        // Handle keyboard events
+        document.addEventListener('keydown', (e) => {
+            if (!isEnabled) return;
+            
+            // Don't capture Escape key (used to exit cursor mode)
+            if (e.key === 'Escape') {
+                pointerLockExitRequested = true;
+                return;
+            }
+            
+            if (isTextInputActive) return;
+            
+            // Don't capture keyboard when settings are visible
+            if (isSettingsActive) return;
+
+            window.electronAPI.sendKeyDown({
+                key: e.key,
+                code: e.code,
+                shiftKey: e.shiftKey,
+                ctrlKey: e.ctrlKey,
+                altKey: e.altKey,
+                metaKey: e.metaKey
+            });
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            if (!isEnabled) return;
+            if (e.key === 'Escape') return;
+            
+            if (isTextInputActive) return;
+            
+            // Don't capture keyboard when settings are visible
+            if (isSettingsActive) return;
+            
+            window.electronAPI.sendKeyUp({
+                key: e.key,
+                code: e.code,
+                shiftKey: e.shiftKey,
+                ctrlKey: e.ctrlKey,
+                altKey: e.altKey,
+                metaKey: e.metaKey
+            });
+        });
+        
+        document.addEventListener('keypress', (e) => {
+            if (!isEnabled) return;
+            if (e.key === 'Escape') return;
+            
+            if (isTextInputActive) return;
+            
+            // Don't capture keyboard when settings are visible
+            if (isSettingsActive) return;
+            
+            window.electronAPI.sendChar({
+                char: e.key
+            });
+        });
+        
+        // Handle scroll/wheel events
+        document.addEventListener('wheel', (e) => {
+            if (!isEnabled) return;
+            
+            // Prevent default scrolling of the overlay itself
+            e.preventDefault();
+            
+            window.electronAPI.sendWheel({
+                deltaX: e.deltaX,
+                deltaY: e.deltaY,
+                canScroll: true
+            });
+        }, { passive: false });
+        
+        // Prevent context menu
+        document.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+        });
+
+        // ============================
+        // SUGGESTIONS RENDERING LOGIC
+        // ============================
+        const suggestionsContainer = document.getElementById('suggestions-container');
+        const suggestionsList = document.getElementById('suggestions');
+
+        window.suggestionsAPI?.onSuggestions((s) => {
+            suggestionsList.innerHTML = '';
+
+            if (!s || s.length === 0) {
+                suggestionsContainer.style.display = 'none';
+                return;
+            }
+
+            suggestions = s;
+
+            s.forEach((suggestion, index) => {
+                const li = document.createElement('li');
+                li.className = 'suggestion-item';
+                if (index === selected) {
+                    li.classList.add('selected');
+                }
+                
+                const content = document.createElement('div');
+                content.className = 'suggestion-content';
+                
+                const title = document.createElement('div');
+                title.className = 'suggestion-title';
+                title.textContent = suggestion.title;
+                
+                content.appendChild(title);
+                
+                if (suggestion.subtitle) {
+                    const subtitle = document.createElement('div');
+                    subtitle.className = 'suggestion-subtitle';
+                    subtitle.textContent = suggestion.subtitle;
+                    content.appendChild(subtitle);
+                }
+                
+                const badge = document.createElement('span');
+                badge.className = 'type-badge';
+                badge.textContent = suggestion.type;
+                
+                li.appendChild(content);
+                li.appendChild(badge);
+                
+                li.addEventListener('click', () => {
+                    window.suggestionsAPI.navigateTo(suggestion.value);
+                });
+                
+                suggestionsList.appendChild(li);
+            });
+
+            suggestionsContainer.style.display = 'block';
+        });
+
+        // ============================
+        // IPC LISTENERS
+        // ============================
+        
+        // Listen for hide suggestions command from main process
+        if (window.electron?.ipc) {
+            window.electron.ipc.on('suggestions:hide', () => {
+                suggestionsContainer.style.display = "none";
+            });
+        }
+        
+        // Crosshair position updates
+        if (window.crosshair?.onMove) {
+            window.crosshair.onMove((pos) => {
+                crosshairPos = pos;
+                const left = pos.x - HALF;
+                const top = pos.y - HALF;
+                canvas.style.transform = `translate(${left}px, ${top}px)`;
+            });
+        }
+
+        // Initial crosshair position
+        canvas.style.transform = `translate(${crosshairPos.x - HALF}px, ${crosshairPos.y - HALF}px)`;
+    </script>
+</body>
+</html>

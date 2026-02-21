@@ -4,34 +4,6 @@ import { IconContext } from "react-icons";
 import { IoMdClose, IoMdAdd } from "react-icons/io";
 
 export default function Tabbar(){
-    const [padding, setPadding] = useState<{left: number, right: number}>({left: 12, right: 12});
-    const os = window.platform.os;
-
-    function getTitlebarInsets() {
-        if (os === "darwin") {
-            return {
-                left: 84,
-                right: 12,
-            };
-        }
-
-        if (os === "win32") {
-            return {
-                left: 12,
-                right: 150,
-            };
-        }
-
-        return {
-            left: 12,
-            right: 12,
-        };
-    }
-
-    useEffect(()=>{
-        setPadding(getTitlebarInsets());
-    }, [])
-
     const [tabs, setTabs] = useState<TabInfo[]>([]);
 
     useEffect(() => {
@@ -46,11 +18,6 @@ export default function Tabbar(){
         return () => unsubscribe && unsubscribe()
     }, [])
 
-    const fetchTabs = async () => {
-        const t = await window.tabs.get()
-        setTabs(t)
-    }
-
     const activateTab = (id: string) => {
         window.tabs.activate(id)
     }
@@ -63,17 +30,8 @@ export default function Tabbar(){
         window.tabs.create(url)
     }
 
-    const [activeUrl, setActiveUrl] = useState<string>("");
-    useEffect(() => {
-        const activeTab = tabs.find(t => t.active);
-        setActiveUrl(activeTab?.url ?? "");
-    }, [tabs]);
-
     return (
-        <div style={{
-            paddingLeft: padding.left + "px",
-            paddingRight: padding.right + "px",
-        }} className="cursor-default topbar flex items-center h-[2.375rem] border-b-2 border-b-solid border-b-[#333] box-border">
+        <div className="pr-[120px] [--webkit-app-region:no-drag] topbar flex items-center h-[2.375rem] border-b-2 border-b-solid border-b-[#333] box-border">
             {tabs.map(tab => (
                 <div
                     key={tab.id}

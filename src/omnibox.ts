@@ -15,7 +15,7 @@ export async function getOmniboxSuggestions(
 ) {
     const value = input.trim().toLowerCase()
 
-    const res = await fetch(`https://suggestqueries.google.com/complete/search?client=firefox&q=${encodeURIComponent(input)}`)
+    const res = await fetch(`https://suggestqueries.google.com/complete/search?client=firefox&q=${input}`)
     const data = await res.json()
     const results: OmniboxSuggestion[] = data[1].map((s: string) => ({
         id: s,

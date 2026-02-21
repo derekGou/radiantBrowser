@@ -16,10 +16,23 @@
     font-style: normal;
 }
 
+@font-face {
+    font-family: "Barlow";
+    src: url("/fonts/Barlow/Barlow-SemiBold.ttf") format("truetype");
+    font-weight: 600;
+    font-style: normal;
+}
+
+* {
+  -webkit-app-region: no-drag !important;
+}
+
 html, body, #root {
     height: 100%;
     margin: 0;
     background-color: #06070D;
+    user-select: none;
+    -webkit-user-select: none;
 }
 
 body {
@@ -30,7 +43,6 @@ body {
 }
 
 .topbar {
-    -webkit-app-region: drag;
     background-color: #06070D;
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
@@ -44,10 +56,6 @@ body {
     backface-visibility: hidden;
 }
 
-.tab {
-    -webkit-app-region: no-drag;
-}
-
 #root {
     height: 100vh;
     display: flex;
@@ -59,40 +67,52 @@ body {
     clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
 }
 
-.clip-bar-1 {
-    clip-path: polygon(
-        0.85rem 0,
-        calc(100% - 0.85rem) 0,
-        100% 0.85rem,
-        calc(100% - 0.85rem) 100%,
-        0.85rem 100%,
-        0 calc(100% - 0.85rem)
-    );
-    -webkit-clip-path: polygon(
-        0.85rem 0,
-        calc(100% - 0.85rem) 0,
-        100% 0.85rem,
-        calc(100% - 0.85rem) 100%,
-        0.85rem 100%,
-        0 calc(100% - 0.85rem)
-    );
+h1, h2, h3, h4, h5, h6, th {
+    font-family: "Valorant";
 }
 
-.clip-bar-2 {
-    clip-path: polygon(
-        0.75rem 0,
-        calc(100% - 0.75rem) 0,
-        100% 0.75rem,
-        calc(100% - 0.75rem) 100%,
-        0.75rem 100%,
-        0 calc(100% - 0.75rem)
-    );
-    -webkit-clip-path: polygon(
-        0.75rem 0,
-        calc(100% - 0.75rem) 0,
-        100% 0.75rem,
-        calc(100% - 0.75rem) 100%,
-        0.75rem 100%,
-        0 calc(100% - 0.75rem)
-    );
+table {
+    border: none;
+    width: 100%;
+}
+tr:nth-child(even){background-color: #fff2;}
+td:nth-child(even){background-color: #fff2;}
+td {
+    width: 50%;
+}
+td, th {
+    border: none;
+    outline: none;
+    padding: 0;
+}
+tr:nth-child(even):hover {
+    background-color: #fff3;
+}
+tr:nth-child(odd):hover {
+    background-color: #fff1;
+}
+.headrow {
+    background-color: transparent !important;
+}
+
+th {
+    color: white;
+    text-align: left;
+    font-size: 0.8rem;
+    padding: 1rem 0rem 0.25rem 0rem;
+}
+
+.fade {
+    -webkit-mask-image: linear-gradient(linear, left top, left bottom, rgba(0,0,0,1) 0%, rgba(0, 0, 0, 1) 20%, rgba(0,0,0,0) 90%, rgba(0,0,0,0) 100%);
+    mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0, 0, 0, 1) 20%, rgba(0,0,0,0) 90%, rgba(0,0,0,0) 100%);
+}
+
+.no-bar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Hide scrollbar for IE, Edge and Firefox */
+.no-bar {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
 }

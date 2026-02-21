@@ -1,5 +1,8 @@
-import { BrowserWindow, WebContentsView } from 'electron'
+import { BrowserWindow, WebContentsView, session, net } from 'electron'
+import path from 'node:path'
+import fs from 'node:fs'
 import { v4 as uuid } from 'uuid'
+import { addHistoryEntry, getHistoryEntries, updateHistoryEntryTitle } from './settingsDB'
 
 type Tab = {
     id: string
@@ -8,40 +11,195 @@ type Tab = {
 }
 
 export type TabInfo = {
-  id: string
-  title: string
-  url: string
-  active: boolean
+    id: string
+    title: string
+    url: string
+    active: boolean
+}
+
+export type TabHistoryEntry = {
+    tabId: string
+    tabTitle: string
+    index: number
+    url: string
+    title?: string
+    timestamp: number
+    isActive: boolean
+    dbId?: number  // Database ID for persistent history entries
 }
 
 export class Tabs {
     private win: BrowserWindow
     private tabs = new Map<string, Tab>()
     private activeTabId: string | null = null
+    private locale: string
+    private ses: Electron.Session
+    private headerListenerAttached = false
+    private preloadPath?: string
+    private isDev: boolean
+    private devServerUrl: string
+    private radiantProtocolRegistered = false
+    private historyTimestamps = new Map<string, Map<number, number>>()
+    private loadRetryCounts = new Map<string, number>()
 
     private UI_OFFSET = 96
 
-    constructor(win: BrowserWindow) {
+    constructor(
+        win: BrowserWindow,
+        locale: string = 'en-US',
+        preloadPath?: string,
+        isDev: boolean = false,
+        devServerUrl: string = ''
+    ) {
         this.win = win
+        this.locale = locale
+        this.preloadPath = preloadPath
+        this.isDev = isDev
+        this.devServerUrl = devServerUrl
+        
+        // Use a single partition name regardless of locale
+        // This way the partition gets cleared when the app restarts
+        const partitionName = `persist:tabs`
+        this.ses = session.fromPartition(partitionName)
+        
+        // Set up the Accept-Language header ONCE for all requests
+        this.setupLanguageHeaders()
+        
+        // Set spellcheck language
+        const langCode = this.locale.split('-')[0];
+        this.ses.setSpellCheckerLanguages([langCode]);
+        
         win.on('resize', () => this.resizeActive())
+
+        this.registerRadiantProtocol()
     }
 
-    create(url = '') {
+    private registerRadiantProtocol() {
+        if (this.radiantProtocolRegistered) return
+
+        const resolveRadiantTarget = (url: URL) => {
+            const host = url.host
+            const pathName = url.pathname || '/'
+
+            if ((host === 'newtab' || host === 'settings' || host === 'history') && (pathName === '/' || pathName === '')) {
+                if (host === 'settings') return '/radiant-settings.html'
+                if (host === 'history') return '/radiant-history.html'
+                return '/radiant-newtab.html'
+            }
+
+            if (host === 'newtab' || host === 'settings' || host === 'history') {
+                return pathName
+            }
+
+            return `/${host}${pathName}`
+        }
+
+        if (this.isDev) {
+            this.ses.protocol.handle('radiant', async (request) => {
+                const url = new URL(request.url)
+                const targetPath = resolveRadiantTarget(url)
+                const resolvedUrl = `${this.devServerUrl}${targetPath}${url.search}`
+                return net.fetch(resolvedUrl)
+            })
+        } else {
+            this.ses.protocol.handle('radiant', async (request) => {
+                const url = new URL(request.url)
+                const targetPath = resolveRadiantTarget(url)
+                const target = targetPath.replace(/^\/+/, '')
+                const filePath = path.join(
+                    process.resourcesPath,
+                    'app.asar',
+                    '.vite',
+                    'renderer',
+                    'main_window',
+                    target
+                )
+                console.log('[radiant protocol] url:', request.url)
+                console.log('[radiant protocol] targetPath:', targetPath)
+                console.log('[radiant protocol] resolved filePath:', filePath)
+                console.log('[radiant protocol] file exists?', fs.existsSync(filePath))
+                return net.fetch('file://' + filePath)
+            })
+        }
+
+        this.radiantProtocolRegistered = true
+    }
+
+    private setupLanguageHeaders() {
+        if (this.headerListenerAttached) return;
+        
+        this.ses.webRequest.onBeforeSendHeaders((details, callback) => {
+            details.requestHeaders['Accept-Language'] = this.locale;
+            callback({ requestHeaders: details.requestHeaders });
+        });
+        
+        this.headerListenerAttached = true;
+    }
+
+    private resize(view: WebContentsView) {
+        const { width, height } = this.win.getBounds()
+
+        view.setBounds({
+            x: 0,
+            y: this.UI_OFFSET,
+            width,
+            height: height - this.UI_OFFSET
+        })
+    }
+
+    private resizeActive() {
+        if (!this.activeTabId) return
+        const tab = this.tabs.get(this.activeTabId)
+        tab && this.resize(tab.view)
+    }
+
+    create(url = 'radiant://newtab') {
         const view = new WebContentsView({
             webPreferences: {
                 sandbox: true,
-                contextIsolation: true
+                contextIsolation: true,
+                session: this.ses,  // Use the shared session
+                ...(this.preloadPath ? { preload: this.preloadPath } : {})
             }
         })
 
-        view.webContents.loadURL(url)
-
         const id = uuid()
+        this.loadRetryCounts.set(id, 0)
+
+        // Load URL or default to blank
+        if (url) {
+            view.webContents.loadURL(url);
+        } else {
+            view.webContents.loadURL('radiant://newtab');
+        }
+
+        // Hide cursor in the renderer
+        view.webContents.on('did-finish-load', () => {
+            try {
+                view.webContents.insertCSS(`
+                    * {
+                        cursor: none !important;
+                    }
+                    body, html {
+                        cursor: none !important;
+                    }
+                `);
+            } catch (e) {
+                console.error('Error injecting cursor CSS:', e);
+            }
+        });
 
         view.webContents.on("did-navigate", (_, url) => {
             const t = this.tabs.get(id);
             if (!t) return;
             t.url = url;
+            this.recordHistoryTimestamp(id)
+            // Save to persistent history (skip radiant:// internal pages)
+            if (!url.startsWith('radiant://')) {
+                const title = view.webContents.getTitle();
+                addHistoryEntry(url, title);
+                console.log(`[History] Saved navigation to DB: ${url} (title: ${title || 'pending...'})`);  
+            }
             this.sendUpdate();
         });
 
@@ -49,19 +207,92 @@ export class Tabs {
             const t = this.tabs.get(id);
             if (!t) return;
             t.url = url;
+            this.recordHistoryTimestamp(id)
+            // For in-page navigation (hash/pushState), only update title, don't create new entry
+            if (!url.startsWith('radiant://')) {
+                const title = view.webContents.getTitle();
+                updateHistoryEntryTitle(url, title);
+                console.log(`[History] Updated title for in-page navigation: ${url} (title: ${title || 'pending...'})`);
+            }
             this.sendUpdate();
         });
 
-        view.webContents.on('page-title-updated', () => {
+        view.webContents.on('page-title-updated', (_, title) => {
+            // Update the title in the database for the current URL
+            const currentUrl = view.webContents.getURL();
+            if (currentUrl && !currentUrl.startsWith('radiant://')) {
+                updateHistoryEntryTitle(currentUrl, title);
+                console.log(`[History] Updated title in DB for ${currentUrl}: ${title}`);
+            }
             this.sendUpdate()
         })
+        
+        view.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+            console.error(`[did-fail-load] url: ${validatedURL}, error: ${errorDescription}, code: ${errorCode}, isMainFrame: ${isMainFrame}`);
 
-        this.tabs.set(id, { id, url, view })
+            if (!isMainFrame) {
+                console.log('[did-fail-load] ignoring sub-frame load failure')
+                return
+            }
+            if (!validatedURL) {
+                console.log('[did-fail-load] no validatedURL')
+                return
+            }
+
+            // Ignore intentional aborts (e.g., new navigation)
+            if (errorCode === -3) {
+                console.log('[did-fail-load] ignoring abort error')
+                return
+            }
+
+            const attempts = this.loadRetryCounts.get(id) ?? 0
+            console.log('[did-fail-load] retry attempt', attempts + 1)
+            if (attempts >= 2) {
+                console.log('[did-fail-load] max retries reached')
+                return
+            }
+
+            this.loadRetryCounts.set(id, attempts + 1)
+            setTimeout(() => {
+                if (!view.webContents.isDestroyed()) {
+                    console.log('[did-fail-load] retrying load of', validatedURL)
+                    view.webContents.loadURL(validatedURL)
+                }
+            }, 250)
+        })
+
+        view.webContents.on('did-finish-load', () => {
+            console.log('[did-finish-load] page loaded successfully')
+            this.loadRetryCounts.set(id, 0)
+        })
+
+        this.tabs.set(id, { id, url: url || 'radiant://newtab', view })
+
+        this.recordHistoryTimestamp(id)
 
         this.activate(id)
         // notify renderer about new tabs
         this.sendUpdate()
+
         return id
+    }
+
+    private recordHistoryTimestamp(tabId: string) {
+        const tab = this.tabs.get(tabId)
+        if (!tab) return
+
+        const nav = (tab.view.webContents as any).navigationHistory
+        if (!nav || typeof nav.getActiveIndex !== 'function') return
+
+        const activeIndex = nav.getActiveIndex()
+        if (activeIndex < 0) return
+
+        let map = this.historyTimestamps.get(tabId)
+        if (!map) {
+            map = new Map<number, number>()
+            this.historyTimestamps.set(tabId, map)
+        }
+        map.set(activeIndex, Date.now())
     }
 
     activate(id: string) {
@@ -99,20 +330,29 @@ export class Tabs {
 
         // Remove from contentView if active
         if (this.activeTabId === id) {
-            this.win.contentView.removeChildView(tab.view)
+            try {
+                this.win.contentView.removeChildView(tab.view)
+            } catch (e) {
+                console.error('Error removing child view:', e);
+            }
             this.activeTabId = null
         }
 
-        // Destroy web contents
+        // Close the webContents (this is the correct method)
         try {
-            (tab.view.webContents as any).destroy()
-        } catch {}
+            if (tab.view && tab.view.webContents && !tab.view.webContents.isDestroyed()) {
+                tab.view.webContents.close();
+            }
+        } catch (e) {
+            console.error('Error closing webContents:', e);
+        }
 
         // Delete from map
         this.tabs.delete(id)
+        this.loadRetryCounts.delete(id)
 
-        if (this.tabs.size === 0) {
-            this.win.close()   // or this.win.destroy()
+        if (this.tabs.size === 0 && !this.win.isDestroyed()) {
+            this.win.close()
             return
         }
 
@@ -121,34 +361,15 @@ export class Tabs {
         else this.sendUpdate()
     }
 
-
-
-    private resize(view: WebContentsView) {
-        const { width, height } = this.win.getBounds()
-
-        view.setBounds({
-            x: 0,
-            y: this.UI_OFFSET,
-            width,
-            height: height - this.UI_OFFSET
-        })
-    }
-
     setUIOffset(px: number) {
         this.UI_OFFSET = px;
         this.resizeActive();
     }
 
-    private resizeActive() {
-        if (!this.activeTabId) return
-        const tab = this.tabs.get(this.activeTabId)
-        tab && this.resize(tab.view)
-    }
-
     private toTabInfo(): TabInfo[] {
         return [...this.tabs.values()].map(tab => ({
             id: tab.id,
-            title: tab.view.webContents.getTitle() || 'New Tab',
+            title: tab.url == "radiant://settings" ? 'Settings' : tab.view.webContents.getTitle() || 'New Tab',
             url: tab.url,
             active: tab.id === this.activeTabId
         }))
@@ -207,6 +428,35 @@ export class Tabs {
         this.sendUpdate();
     }
 
+    reloadActive() {
+        const tab = this.getActiveTab()
+        if (!tab?.view?.webContents) return
+
+        const currentUrl = tab.view.webContents.getURL()
+        const storedUrl = tab.url
+        const isRadiant =
+            (storedUrl && storedUrl.startsWith('radiant://')) ||
+            (currentUrl && currentUrl.startsWith('radiant://'))
+
+        console.log('[reloadActive] storedUrl:', storedUrl)
+        console.log('[reloadActive] currentUrl:', currentUrl)
+        console.log('[reloadActive] isRadiant:', isRadiant)
+
+        if (isRadiant) {
+            const targetUrl = storedUrl && storedUrl.startsWith('radiant://')
+                ? storedUrl
+                : currentUrl
+            console.log('[reloadActive] reloading radiant URL:', targetUrl)
+            if (targetUrl) {
+                tab.view.webContents.loadURL(targetUrl)
+                return
+            }
+        }
+
+        console.log('[reloadActive] reloading non-radiant URL via reloadIgnoringCache')
+        tab.view.webContents.reloadIgnoringCache()
+    }
+
     getActiveTab = (): Tab | null => {
         if (!this.activeTabId) return null
         return this.tabs.get(this.activeTabId) ?? null
@@ -225,7 +475,6 @@ export class Tabs {
     }
 
     goBack = () => {
-        console.log("triggered")
         const tab = this.getActiveTab();
         if (tab?.view.webContents.navigationHistory.canGoBack()) {
             tab.view.webContents.navigationHistory.goBack()
@@ -237,5 +486,40 @@ export class Tabs {
         if (tab?.view.webContents.navigationHistory.canGoForward()) {
             tab.view.webContents.navigationHistory.goForward()
         }
+    }
+
+    getHistory = (): { entries: TabHistoryEntry[] } => {
+        const entries: TabHistoryEntry[] = []
+
+        // Get all entries from database
+        const dbEntries = getHistoryEntries(500)
+        
+        dbEntries.forEach((entry) => {
+            entries.push({
+                tabId: 'persistent-history',
+                tabTitle: 'History',
+                index: -1,
+                url: entry.url,
+                title: entry.title || entry.url,
+                timestamp: entry.timestamp,
+                isActive: false,
+                dbId: entry.id
+            })
+        })
+
+        return { entries }
+    }
+
+    goToHistoryEntry = (url: string) => {
+        // Navigate to the URL in the active tab, or create a new tab if none exists
+        if (this.activeTabId) {
+            const tab = this.tabs.get(this.activeTabId)
+            if (tab) {
+                tab.view.webContents.loadURL(url)
+                return
+            }
+        }
+        // No active tab, create a new one
+        this.create(url)
     }
 }

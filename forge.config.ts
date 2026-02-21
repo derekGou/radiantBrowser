@@ -6,10 +6,30 @@ import { MakerRpm } from '@electron-forge/maker-rpm';
 import { VitePlugin } from '@electron-forge/plugin-vite';
 import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const getKeytapResources = () => {
+  const resources = [];
+  const resourceDir = path.join(__dirname, 'resources');
+  
+  // Include macOS binary if it exists
+  if (fs.existsSync(path.join(resourceDir, 'keytap'))) {
+    resources.push('./resources/keytap');
+  }
+  
+  // Include Windows binary if it exists
+  if (fs.existsSync(path.join(resourceDir, 'keytap.exe'))) {
+    resources.push('./resources/keytap.exe');
+  }
+  
+  return resources;
+};
 
 const config: ForgeConfig = {
   packagerConfig: {
     icon: './public/assets/radiantbrowser',
+    extraResource: getKeytapResources(),
     asar: {
       // ensure the entire Vite build output is unpacked so preload and other
       // runtime artifacts are available at the expected unpacked path
@@ -26,7 +46,6 @@ const config: ForgeConfig = {
   plugins: [
     new VitePlugin({
       // `build` can specify multiple entry builds, which can be Main process, Preload scripts, Worker process, etc.
-      // If you are familiar with Vite configuration, it will look really familiar.
       build: [
         {
           // `entry` is just an alias for `build.lib.entry` in the corresponding file of `config`.

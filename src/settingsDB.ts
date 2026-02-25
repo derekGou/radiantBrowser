@@ -30,7 +30,10 @@ db.prepare(`
 const defaultSettings: Record<string, any> = {
     invertMouse: false,
     sensitivity: 1,
-    crosshair: "0;P;b;0;",
+    crosshairs: [
+        { name: "Default", code: "0;P;z;2" }
+    ],
+    currentCrosshair: 0,
     history: [
         ["y"],
         []
@@ -53,15 +56,15 @@ const defaultSettings: Record<string, any> = {
     ],
     zoominTab: [
         ["+"],
-        []
+        ["="]
     ],
     zoomoutTab: [
         ["-"],
-        []
+        ["_"]
     ],
     zoomresetTab: [
         ["0"],
-        ["ctrl"]
+        []
     ],
 };
 
@@ -194,4 +197,60 @@ export function updateHistoryEntryTitle(url: string, title: string) {
             LIMIT 1
         )
     `).run(title, url);
+}
+
+// Crosshair preset functions
+export interface CrosshairPreset {
+    name: string;
+    code: string;
+}
+
+export function getCrosshairPresets(): CrosshairPreset[] {
+    return getSetting<CrosshairPreset[]>("crosshairs", [
+        { name: "Default", code: "0;P;z;2" }
+    ]);
+}
+
+export function getCurrentCrosshairIndex(): number {
+    return getSetting<number>("currentCrosshair", 0);
+}
+
+export function getCurrentCrosshair(): CrosshairPreset {
+    const presets = getCrosshairPresets();
+    const index = getCurrentCrosshairIndex();
+    return presets[index] || presets[0] || { name: "Default", code: "0;P;z;2" };
+}
+
+export function setCurrentCrosshairIndex(index: number) {
+    const presets = getCrosshairPresets();
+    if (index >= 0 && index < presets.length) {
+        setSetting("currentCrosshair", index);
+    }
+}
+
+export function addCrosshairPreset(preset: CrosshairPreset) {
+    const presets = getCrosshairPresets();
+    presets.push(preset);
+    setSetting("crosshairs", presets);
+}
+
+export function removeCrosshairPreset(index: number) {
+    const presets = getCrosshairPresets();
+    if (presets.length > 1) {
+        presets.splice(index, 1);
+        setSetting("crosshairs", presets);
+        // If the removed preset was the current one, switch to index 0
+        if (getCurrentCrosshairIndex() >= presets.length) {
+            setCurrentCrosshairIndex(0);
+        }
+    }
+}
+
+export function updateCrosshairPreset(preset: CrosshairPreset) {
+    const presets = getCrosshairPresets();
+    const index = getCurrentCrosshairIndex();
+    if (index >= 0 && index < presets.length) {
+        presets[index] = preset;
+        setSetting("crosshairs", presets);
+    }
 }

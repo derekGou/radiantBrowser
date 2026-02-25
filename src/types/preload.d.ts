@@ -44,6 +44,12 @@ declare global {
     interface CrosshairAPI {
         onMove: (callback: (pos: { x: number; y: number }) => void) => () => void;
         getWindowBounds: () => Promise<{ x: number; y: number }>;
+        getSettings: () => Promise<import('../components/crosshair/crosshair').CrosshairSettings>;
+        getPresets: () => Promise<Array<{ name: string; code: string }>>;
+        setCurrentIndex: (index: number) => Promise<void>;
+        addPreset: (name: string, code: string) => Promise<Array<{ name: string; code: string }>>;
+        removePreset: (index: number) => Promise<Array<{ name: string; code: string }>>;
+        updatePreset: (name: string, code: string) => Promise<Array<{ name: string; code: string }>>;
     }
 
     interface Window {

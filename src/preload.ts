@@ -112,6 +112,12 @@ contextBridge.exposeInMainWorld('crosshair', {
         return () => ipcRenderer.removeListener('crosshair:move', listener);
     },
     getWindowBounds: () => ipcRenderer.invoke('get-window-bounds'),
+    getSettings: () => ipcRenderer.invoke('crosshair:getSettings'),
+    getPresets: () => ipcRenderer.invoke('crosshair:getPresets'),
+    setCurrentIndex: (index: number) => ipcRenderer.invoke('crosshair:setCurrentIndex', index),
+    addPreset: (name: string, code: string) => ipcRenderer.invoke('crosshair:addPreset', name, code),
+    removePreset: (index: number) => ipcRenderer.invoke('crosshair:removePreset', index),
+    updatePreset: (name: string, code: string) => ipcRenderer.invoke('crosshair:updatePreset', name, code),
 });
 
 // Alias for input capture window - comprehensive input handling

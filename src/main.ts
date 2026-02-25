@@ -9,6 +9,10 @@ import { exec, spawn, ChildProcess } from "child_process"
 import { registerSettingsIPC } from "./ipcSettings"
 import { db, getSetting, deleteHistoryEntry, clearHistoryByTimePeriod } from './settingsDB'
 
+// Track launch performance
+const LAUNCH_START_TIME = performance.now()
+console.log('[Launch] App started')
+
 if (started) app.quit()
 
 protocol.registerSchemesAsPrivileged([
@@ -181,6 +185,11 @@ function toggleCustomCursor() {
         // Notify first, then hide
         mainWindow.webContents.send('customcursor:enabled', false)
         overlayWindow.webContents.send('customcursor:enabled', false)
+
+        // Keep overlay focused so the next click is captured immediately
+        overlayWindow.show()
+        overlayWindow.moveTop()
+        overlayWindow.focus()
     }
 }
 
@@ -645,6 +654,8 @@ function handleClick(sendInputEvents = true) {
 
 
 function createWindow() {
+    console.log(`[Launch] Creating window: ${(performance.now() - LAUNCH_START_TIME).toFixed(2)}ms`)
+    
     const isDev = process.env.NODE_ENV === 'development'
     const preloadPath = isDev
         ? path.join(__dirname, 'preload.js')
@@ -653,6 +664,7 @@ function createWindow() {
     mainWindow = new BrowserWindow({
         width: 1200,
         height: 800,
+        show: false, // Don't show until ready - improves perceived performance
         transparent: true,
         autoHideMenuBar: true,
         backgroundColor: '#06070D',
@@ -665,8 +677,6 @@ function createWindow() {
             nodeIntegration: false,
         },
     })
-
-    if (isDev) mainWindow.webContents.openDevTools()
 
     mainWindow.setWindowButtonVisibility(false)
 
@@ -691,6 +701,29 @@ function createWindow() {
         console.error(`Failed to load: ${errorDescription} (Code: ${errorCode})`)
     })
 
+    mainWindow.webContents.on('did-finish-load', () => {
+        const loadTime = performance.now()
+        console.log(`[Launch] Main window loaded: ${(loadTime - LAUNCH_START_TIME).toFixed(2)}ms`)
+        console.log(`[Launch] 🚀 Browser ready! Total time: ${(loadTime - LAUNCH_START_TIME).toFixed(2)}ms`)
+        
+        // Show window now that it's ready
+        if (isUsable(mainWindow)) {
+            // Ensure UI window is NOT zoomed
+            mainWindow.webContents.setZoomLevel(0)
+            mainWindow.show()
+            
+            // Defer non-critical operations
+            setImmediate(() => {
+                if (isDev && isUsable(mainWindow)) {
+                    mainWindow.webContents.openDevTools()
+                }
+                startKeytapProcess()
+            })
+        }
+    })
+
+    console.log(`[Launch] Main window created: ${(performance.now() - LAUNCH_START_TIME).toFixed(2)}ms`)
+
     tabs = new Tabs(mainWindow, currentLocale, preloadPath, isDev, MAIN_WINDOW_VITE_DEV_SERVER_URL)
     tabs.create('')
 
@@ -709,16 +742,20 @@ function createWindow() {
         modal: false,
         skipTaskbar: true,
         fullscreenable: true,
-        show: true,
+        show: false, // Start hidden for better performance
         parent: mainWindow,
+        acceptFirstMouse: true,
         webPreferences: {
             preload: preloadPath,
             contextIsolation: true,
             nodeIntegration: false,
         }
     })
-
-    // if (isDev) overlayWindow.webContents.openDevTools()
+    
+    // Show overlay after it loads
+    overlayWindow.webContents.once('did-finish-load', () => {
+        if (isUsable(overlayWindow)) overlayWindow.show()
+    })
 
     if (isDev) {
         overlayWindow.loadFile('./src/components/overlay/index.html')
@@ -727,6 +764,15 @@ function createWindow() {
     }
 
     overlayWindow.setAlwaysOnTop(true, "normal")
+    
+    console.log(`[Launch] Overlay window created: ${(performance.now() - LAUNCH_START_TIME).toFixed(2)}ms`)
+
+    // Ensure overlay window is NOT zoomed
+    overlayWindow.webContents.on('did-finish-load', () => {
+        if (isUsable(overlayWindow)) {
+            overlayWindow.webContents.setZoomLevel(0)
+        }
+    })
 
     // Handle keyboard input for shortcuts when overlay window is focused
     overlayWindow.webContents.on('before-input-event', (event, input) => {
@@ -740,13 +786,28 @@ function createWindow() {
             metaKey: input.meta || false
         }
 
-        console.log('[shortcut] overlay keydown', {
-            key: eventForMatching.key,
-            shift: eventForMatching.shiftKey,
-            ctrl: eventForMatching.ctrlKey,
-            alt: eventForMatching.altKey,
-            meta: eventForMatching.metaKey
-        })
+        // Prevent Electron's default zoom from affecting overlay UI
+        if ((eventForMatching.ctrlKey || eventForMatching.metaKey) && 
+            (eventForMatching.key === '=' || eventForMatching.key === '+' || 
+             eventForMatching.key === '-' || eventForMatching.key === '_' || eventForMatching.key === '0')) {
+            event.preventDefault()
+            // Don't return - let our handlers process it
+        }
+
+        // Handle special shortcuts: Shift+Enter and Shift+Esc
+        if (eventForMatching.key === 'Enter' && eventForMatching.shiftKey && !eventForMatching.ctrlKey && !eventForMatching.altKey && !eventForMatching.metaKey) {
+            if (isCustomCursorMode) {
+                event.preventDefault()
+                toggleCustomCursor()
+                return
+            }
+        }
+        
+        if (eventForMatching.key === 'Escape' && eventForMatching.shiftKey && !eventForMatching.ctrlKey && !eventForMatching.altKey && !eventForMatching.metaKey) {
+            event.preventDefault()
+            toggleCustomCursor()
+            return
+        }
 
         const shortcuts = {
             history: getSetting('history', [['y'], []]),
@@ -754,16 +815,26 @@ function createWindow() {
             closeTab: getSetting('closeTab', [['w'], []]),
             reloadTab: getSetting('reloadTab', [['r'], []]),
             newTab: getSetting('newTab', [['t'], []]),
-            zoominTab: getSetting('zoominTab', [['+'], []]),
-            zoomoutTab: getSetting('zoomoutTab', [['-'], []]),
-            zoomresetTab: getSetting('zoomresetTab', [['0'], ['ctrl']])
+            zoominTab: getSetting('zoominTab', [['+'], ["="]]),
+            zoomoutTab: getSetting('zoomoutTab', [['-'], ["_"]]),
+            zoomresetTab: getSetting('zoomresetTab', [['0'], []])
+        }
+
+        // Debug zoom shortcuts and loaded settings
+        if ((eventForMatching.ctrlKey || eventForMatching.metaKey) && 
+            (eventForMatching.key === '=' || eventForMatching.key === '+' || 
+             eventForMatching.key === '-' || eventForMatching.key === '_' || eventForMatching.key === '0')) {
+            console.log('[DEBUG ZOOM] Key pressed:', eventForMatching.key, 'shift:', eventForMatching.shiftKey, 'meta:', eventForMatching.metaKey, 'ctrl:', eventForMatching.ctrlKey)
+            console.log('[DEBUG ZOOM] Loaded shortcuts config:', JSON.stringify(shortcuts))
+            console.log('[DEBUG ZOOM] zoominTab from DB:', JSON.stringify(getSetting('zoominTab')))
+            console.log('[DEBUG ZOOM] zoomoutTab from DB:', JSON.stringify(getSetting('zoomoutTab')))
         }
 
         for (const [action, shortcutConfig] of Object.entries(shortcuts)) {
             if (matchesShortcut(eventForMatching, shortcutConfig as any)) {
-                console.log('[shortcut] matched (overlay)', action, shortcutConfig)
                 event.preventDefault()
                 handleShortcutAction(action)
+                console.log('[DEBUG ZOOM] Matched action:', action)
                 return
             }
         }
@@ -774,25 +845,11 @@ function createWindow() {
         stopKeytapProcess()
     })
 
-    mainWindow.on('show', () => {
-        startKeytapProcess()
-    })
+    // Keytap now started after main window loads (deferred)
 
     // Handle keyboard input for shortcuts even when custom cursor is off
     mainWindow.webContents.on('before-input-event', (event, input) => {
         if (input.type !== 'keyDown') return
-        
-        // Check for shortcuts
-        const shortcuts = {
-            history: getSetting('history', [['y'], []]),
-            find: getSetting('find', [['f'], []]),
-            closeTab: getSetting('closeTab', [['w'], []]),
-            reloadTab: getSetting('reloadTab', [['r'], []]),
-            newTab: getSetting('newTab', [['t'], []]),
-            zoominTab: getSetting('zoominTab', [['+'], []]),
-            zoomoutTab: getSetting('zoomoutTab', [['-'], []]),
-            zoomresetTab: getSetting('zoomresetTab', [['0'], ['ctrl']])
-        }
         
         // Convert input event to shortcut-matching format
         const eventForMatching = {
@@ -803,38 +860,58 @@ function createWindow() {
             metaKey: input.meta || false
         }
         
-        console.log('[shortcut] keydown', {
-            key: eventForMatching.key,
-            shift: eventForMatching.shiftKey,
-            ctrl: eventForMatching.ctrlKey,
-            alt: eventForMatching.altKey,
-            meta: eventForMatching.metaKey
-        })
-
-        // Check if any shortcut matches
-        for (const [action, shortcutConfig] of Object.entries(shortcuts)) {
-            if (matchesShortcut(eventForMatching, shortcutConfig as any)) {
-                console.log('[shortcut] matched', action, shortcutConfig)
+        // Prevent Electron's default zoom from affecting mainWindow UI
+        if ((eventForMatching.ctrlKey || eventForMatching.metaKey) && 
+            (eventForMatching.key === '=' || eventForMatching.key === '+' || 
+             eventForMatching.key === '-' || eventForMatching.key === '_' || eventForMatching.key === '0')) {
+            event.preventDefault()
+            // Don't return - let our handlers process it
+        }
+        
+        // Handle special shortcuts: Shift+Enter and Shift+Esc
+        if (eventForMatching.key === 'Enter' && eventForMatching.shiftKey && !eventForMatching.ctrlKey && !eventForMatching.altKey && !eventForMatching.metaKey) {
+            if (isCustomCursorMode) {
                 event.preventDefault()
-                handleShortcutAction(action)
+                toggleCustomCursor()
                 return
             }
         }
-    })
-    
-    globalShortcut.register('Shift+Enter', () => {
-        if (isCustomCursorMode) {
+        
+        if (eventForMatching.key === 'Escape' && eventForMatching.shiftKey && !eventForMatching.ctrlKey && !eventForMatching.altKey && !eventForMatching.metaKey) {
+            event.preventDefault()
             toggleCustomCursor()
+            return
         }
-    })
 
-    globalShortcut.register('Shift+Esc', () => {
-        const mainFocused = isUsable(mainWindow) && mainWindow.isFocused()
-        const overlayFocused = isUsable(overlayWindow) && overlayWindow.isFocused()
-        if (!mainFocused && !overlayFocused) return
+        const shortcuts = {
+            history: getSetting('history', [['y'], []]),
+            find: getSetting('find', [['f'], []]),
+            closeTab: getSetting('closeTab', [['w'], []]),
+            reloadTab: getSetting('reloadTab', [['r'], []]),
+            newTab: getSetting('newTab', [['t'], []]),
+            zoominTab: getSetting('zoominTab', [['+'], ['=']]),
+            zoomoutTab: getSetting('zoomoutTab', [['-'], []]),
+            zoomresetTab: getSetting('zoomresetTab', [['0'], []])
+        }
 
-        console.log('Shift+Esc pressed')
-        toggleCustomCursor()
+        // Debug zoom shortcuts and loaded settings
+        if ((eventForMatching.ctrlKey || eventForMatching.metaKey) && 
+            (eventForMatching.key === '=' || eventForMatching.key === '+' || 
+             eventForMatching.key === '-' || eventForMatching.key === '_' || eventForMatching.key === '0')) {
+            console.log('[DEBUG ZOOM OVERLAY] Key pressed:', eventForMatching.key, 'shift:', eventForMatching.shiftKey, 'meta:', eventForMatching.metaKey, 'ctrl:', eventForMatching.ctrlKey)
+            console.log('[DEBUG ZOOM OVERLAY] Loaded shortcuts config:', JSON.stringify(shortcuts))
+            console.log('[DEBUG ZOOM OVERLAY] zoominTab from DB:', JSON.stringify(getSetting('zoominTab')))
+            console.log('[DEBUG ZOOM OVERLAY] zoomoutTab from DB:', JSON.stringify(getSetting('zoomoutTab')))
+        }
+
+        for (const [action, shortcutConfig] of Object.entries(shortcuts)) {
+            if (matchesShortcut(eventForMatching, shortcutConfig as any)) {
+                event.preventDefault()
+                handleShortcutAction(action)
+                console.log('[DEBUG ZOOM MAIN] Matched action:', action)
+                return
+            }
+        }
     })
 
     mainWindow.on("restore", () => {
@@ -895,6 +972,9 @@ function registerRadiantProtocol() {
 }
 
 app.whenReady().then(() => {
+    const readyTime = performance.now()
+    console.log(`[Launch] App ready: ${(readyTime - LAUNCH_START_TIME).toFixed(2)}ms`)
+    
     registerSettingsIPC()
     registerRadiantProtocol()
     createWindow()
@@ -1373,6 +1453,23 @@ function matchesShortcutBinding(event: { key: string; shiftKey: boolean; ctrlKey
 
     if (!keys.includes(pressedKey)) return false
 
+    // Characters that require shift to type
+    const shiftRequiredChars = new Set([
+        '+', '_', '{', '}', '|', '~', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', 
+        ':', '<', '>', '?', '"'
+    ])
+    
+    // Map of unshifted keys to their shifted counterparts
+    const shiftPairs: Record<string, string> = {
+        '=': '+', '-': '_', '[': '{', ']': '}', '\\': '|', '`': '~',
+        '1': '!', '2': '@', '3': '#', '4': '$', '5': '%', '6': '^', '7': '&', '8': '*', '9': '(', '0': ')',
+        ';': ':', ',': '<', '.': '>', '/': '?', "'": '"'
+    }
+    
+    // Check if this key or its shifted counterpart requires shift
+    const isShiftRequiredChar = shiftRequiredChars.has(event.key) || 
+        (event.shiftKey && shiftPairs[event.key] && shiftRequiredChars.has(shiftPairs[event.key]))
+
     // Check modifiers
     const hasShift = normalized.includes('shift')
     const hasCtrl = normalized.includes('ctrl') || normalized.includes('control')
@@ -1383,7 +1480,10 @@ function matchesShortcutBinding(event: { key: string; shiftKey: boolean; ctrlKey
     const requiresMeta = hasMeta || (process.platform === 'darwin' && !hasCtrl && !hasMeta)
     const requiresCtrl = hasCtrl || (process.platform !== 'darwin' && !hasCtrl && !hasMeta)
 
-    return event.shiftKey === hasShift &&
+    // For characters that require shift to type, ignore shift in the comparison
+    const shiftMatches = isShiftRequiredChar ? true : (event.shiftKey === hasShift)
+
+    return shiftMatches &&
         event.ctrlKey === requiresCtrl &&
         event.altKey === hasAlt &&
         event.metaKey === requiresMeta
@@ -1411,20 +1511,31 @@ function handleShortcutAction(action: string) {
             (tabs as any).create('')
             break
         case 'zoominTab':
+            console.log('[ZOOM HANDLER] Zoom in triggered, tab:', tab)
             if (tab?.view?.webContents) {
                 const currentZoom = tab.view.webContents.getZoomLevel()
-                tab.view.webContents.setZoomLevel(currentZoom + 0.5)
+                const newZoom = currentZoom + 0.5
+                console.log('[ZOOM HANDLER] Current zoom:', currentZoom, '→ New zoom:', newZoom)
+                tab.view.webContents.setZoomLevel(newZoom)
+                tab.zoom = newZoom
             }
             break
         case 'zoomoutTab':
+            console.log('[ZOOM HANDLER] Zoom out triggered, tab:', tab)
             if (tab?.view?.webContents) {
                 const currentZoom = tab.view.webContents.getZoomLevel()
-                tab.view.webContents.setZoomLevel(currentZoom - 0.5)
+                const newZoom = currentZoom - 0.5
+                console.log('[ZOOM HANDLER] Current zoom:', currentZoom, '→ New zoom:', newZoom)
+                tab.view.webContents.setZoomLevel(newZoom)
+                tab.zoom = newZoom
             }
             break
         case 'zoomresetTab':
+            console.log('[ZOOM HANDLER] Zoom reset triggered, tab:', tab)
             if (tab?.view?.webContents) {
                 tab.view.webContents.setZoomLevel(0)
+                tab.zoom = 0
+                console.log('[ZOOM HANDLER] Reset zoom to 0')
             }
             break
     }
@@ -1433,7 +1544,14 @@ function handleShortcutAction(action: string) {
 // Keyboard input handling
 ipcMain.on('customcursor:keydown', (_, event: { key: string; code: string; shiftKey: boolean; ctrlKey: boolean; altKey: boolean; metaKey: boolean }) => {
     if (!isCustomCursorMode || !isUsable(mainWindow)) return
-    
+
+    // Block default zoom shortcuts from being passed to webview
+    if ((event.ctrlKey || event.metaKey) && 
+        (event.key === '=' || event.key === '+' || 
+         event.key === '-' || event.key === '0')) {
+        // Will be handled by shortcut matching below
+    }
+
     // Check for shortcuts
     const shortcuts = {
         history: getSetting('history', [['y'], []]),
@@ -1443,13 +1561,12 @@ ipcMain.on('customcursor:keydown', (_, event: { key: string; code: string; shift
         newTab: getSetting('newTab', [['t'], []]),
         zoominTab: getSetting('zoominTab', [['+'], []]),
         zoomoutTab: getSetting('zoomoutTab', [['-'], []]),
-        zoomresetTab: getSetting('zoomresetTab', [['0'], ['ctrl']])
+        zoomresetTab: getSetting('zoomresetTab', [['0'], []])
     }
 
     // Check if any shortcut matches
     for (const [action, shortcutConfig] of Object.entries(shortcuts)) {
         if (matchesShortcut(event, shortcutConfig as any)) {
-            console.log('[shortcut] matched (customcursor)', action, shortcutConfig)
             handleShortcutAction(action)
             return // Shortcut handled, don't pass through to webview
         }
@@ -1701,14 +1818,6 @@ app.on('web-contents-created', (_event, contents) => {
                 metaKey: input.meta || false
             }
 
-            console.log('[shortcut] webview keydown', {
-                key: eventForMatching.key,
-                shift: eventForMatching.shiftKey,
-                ctrl: eventForMatching.ctrlKey,
-                alt: eventForMatching.altKey,
-                meta: eventForMatching.metaKey
-            })
-
             const shortcuts = {
                 history: getSetting('history', [['y'], []]),
                 find: getSetting('find', [['f'], []]),
@@ -1722,7 +1831,6 @@ app.on('web-contents-created', (_event, contents) => {
 
             for (const [action, shortcutConfig] of Object.entries(shortcuts)) {
                 if (matchesShortcut(eventForMatching, shortcutConfig as any)) {
-                    console.log('[shortcut] matched (webview)', action, shortcutConfig)
                     event.preventDefault()
                     handleShortcutAction(action)
                     return

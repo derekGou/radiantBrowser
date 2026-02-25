@@ -823,60 +823,98 @@
 
         let crosshairPos = { x: HALF, y: HALF };
 
+        // Initialize crosshair settings from database
+        async function initializeCrosshairSettings() {
+            try {
+                if (window.crosshair && window.crosshair.getSettings) {
+                    crosshairSettings = await window.crosshair.getSettings();
+                    drawCrosshair();
+                }
+            } catch (error) {
+                // Silently fail - use default crosshair settings
+            }
+        }
+
         function drawCrosshair() {
             ctx.clearRect(0, 0, SIZE, SIZE);
             const c = crosshairSettings.color;
+            const hasOutline = crosshairSettings.outlines?.enabled;
 
-            // Outlines
-            if (crosshairSettings.outlines.enabled) {
-                ctx.globalAlpha = crosshairSettings.outlines.opacity;
-                ctx.lineWidth = crosshairSettings.outlines.thickness;
-                ctx.strokeStyle = c;
-                ctx.strokeRect(0, 0, SIZE, SIZE);
-            }
+            // Draw outer lines (outline then colored)
+            drawLineSet(crosshairSettings.outerLines, hasOutline);
 
-            // Center dot
+            // Draw inner lines (outline then colored) - appears on top of outer
+            drawLineSet(crosshairSettings.innerLines, hasOutline);
+
+            // Draw center dot with outline
             if (crosshairSettings.centerDot.enabled) {
-                ctx.globalAlpha = crosshairSettings.centerDot.opacity;
                 const t = crosshairSettings.centerDot.thickness;
+                const opacity = crosshairSettings.centerDot.opacity;
+
+                ctx.globalAlpha = opacity;
+
+                // Draw black outline if enabled
+                if (hasOutline) {
+                    ctx.fillStyle = "black";
+                    ctx.fillRect(HALF - t / 2 - 1, HALF - t / 2 - 1, t + 2, t + 2);
+                }
+
+                // Draw colored dot on top
                 ctx.fillStyle = c;
                 ctx.fillRect(HALF - t / 2, HALF - t / 2, t, t);
             }
 
-            // Draw line sets
-            drawLineSet(crosshairSettings.innerLines);
-            drawLineSet(crosshairSettings.outerLines);
-
             ctx.globalAlpha = 1;
         }
 
-        function drawLineSet(cfg) {
+        function drawLineSet(cfg, hasOutline) {
             if (!cfg.enabled) return;
 
-            ctx.globalAlpha = cfg.opacity;
-            ctx.lineWidth = cfg.thickness;
+            const { lengthH, lengthV, thickness, opacity } = cfg;
+            const baseOffset = 3; // Default offset from center
+            const offset = baseOffset + (cfg.offset ?? 0);
+            const endH = offset + lengthH; // Where line ends: gap + length
+            const endV = offset + lengthV;
+
+            ctx.globalAlpha = opacity;
+
+            // Draw black outline first (thicker)
+            if (hasOutline) {
+                ctx.lineWidth = thickness + 2;
+                ctx.strokeStyle = "black";
+                ctx.lineCap = "square";
+                ctx.lineJoin = "bevel";
+                ctx.beginPath();
+                ctx.moveTo(HALF - endH, HALF);
+                ctx.lineTo(HALF - offset, HALF);
+                ctx.moveTo(HALF + offset, HALF);
+                ctx.lineTo(HALF + endH, HALF);
+                ctx.moveTo(HALF, HALF - endV);
+                ctx.lineTo(HALF, HALF - offset);
+                ctx.moveTo(HALF, HALF + offset);
+                ctx.lineTo(HALF, HALF + endV);
+                ctx.stroke();
+            }
+
+            // Draw colored lines on top
+            ctx.lineWidth = thickness;
             ctx.strokeStyle = crosshairSettings.color;
-
-            const { lengthH, lengthV, offset } = cfg;
-
+            ctx.lineCap = "square";
+            ctx.lineJoin = "bevel";
             ctx.beginPath();
-
-            // Horizontal lines
-            ctx.moveTo(HALF - offset - lengthH, HALF);
+            ctx.moveTo(HALF - endH, HALF);
             ctx.lineTo(HALF - offset, HALF);
             ctx.moveTo(HALF + offset, HALF);
-            ctx.lineTo(HALF + offset + lengthH, HALF);
-
-            // Vertical lines
-            ctx.moveTo(HALF, HALF - offset - lengthV);
+            ctx.lineTo(HALF + endH, HALF);
+            ctx.moveTo(HALF, HALF - endV);
             ctx.lineTo(HALF, HALF - offset);
             ctx.moveTo(HALF, HALF + offset);
-            ctx.lineTo(HALF, HALF + offset + lengthV);
-
+            ctx.lineTo(HALF, HALF + endV);
             ctx.stroke();
         }
 
-        drawCrosshair();
+        // Initialize on DOM ready
+        initializeCrosshairSettings();
 
         // ============================
         // INPUT CAPTURE LOGIC

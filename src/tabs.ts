@@ -8,6 +8,7 @@ type Tab = {
     id: string
     view: WebContentsView
     url: string
+    zoom: number
 }
 
 export type TabInfo = {
@@ -264,9 +265,11 @@ export class Tabs {
         view.webContents.on('did-finish-load', () => {
             console.log('[did-finish-load] page loaded successfully')
             this.loadRetryCounts.set(id, 0)
+            // Reset zoom when page loads
+            view.webContents.setZoomLevel(0)
         })
 
-        this.tabs.set(id, { id, url: url || 'radiant://newtab', view })
+        this.tabs.set(id, { id, url: url || 'radiant://newtab', view, zoom: 0 })
 
         this.recordHistoryTimestamp(id)
 

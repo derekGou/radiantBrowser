@@ -1,12 +1,119 @@
 import { useEffect, useRef, useState } from "react"
 import { IconContext } from "react-icons";
 import { IoMdArrowDropdown } from "react-icons/io";
+import { MdOutlineDelete, MdContentCopy, MdEditNote } from "react-icons/md";
+import { PiDownloadSimple, PiUploadSimple } from "react-icons/pi";
+
 import OnOff from "./onoff";
 import Slider from "./slider";
 import Shortcut from "./shortcut";
+import type { CrosshairSettings } from "../crosshair/crosshair";
+import { DEFAULT_CROSSHAIR } from "../crosshair/crosshair";
 
 export default function Settings(){
     const [selected, setSelected] = useState(0)
+    const [crosshairSettings, setCrosshairSettings] = useState<CrosshairSettings | null>(null);
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+
+    // Redraw crosshair when tab is selected or settings change
+    const redrawCrosshair = () => {
+        const canvas = canvasRef.current;
+        if (!canvas || !crosshairSettings) return;
+
+        // Ensure canvas size is set
+        canvas.width = 200;
+        canvas.height = 200;
+
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+
+        const SIZE = 200;
+        const HALF = SIZE / 2;
+
+        // Clear with transparent
+        ctx.clearRect(0, 0, SIZE, SIZE);
+
+        const c = crosshairSettings.color || "white";
+        const hasOutline = crosshairSettings.outlines?.enabled;
+
+        // Helper to draw lines with proper outline
+        const drawLines = (cfg: any) => {
+            const lengthH = cfg.lengthH ?? 0;
+            const lengthV = cfg.lengthV ?? 0;
+            const baseOffset = 3; // Default offset from center
+            const offset = baseOffset + (cfg.offset ?? 0);
+            const endH = offset + lengthH; // Where line ends: gap + length
+            const endV = offset + lengthV;
+            const thickness = cfg.thickness ?? 1;
+            const opacity = cfg.opacity ?? 0;
+
+            ctx.globalAlpha = opacity;
+
+            // Draw black outline first (thicker)
+            if (hasOutline) {
+                ctx.lineWidth = thickness + 2;
+                ctx.strokeStyle = "black";
+                ctx.lineCap = "square";
+                ctx.lineJoin = "bevel";
+                ctx.beginPath();
+                ctx.moveTo(HALF - endH, HALF);
+                ctx.lineTo(HALF - offset, HALF);
+                ctx.moveTo(HALF + offset, HALF);
+                ctx.lineTo(HALF + endH, HALF);
+                ctx.moveTo(HALF, HALF - endV);
+                ctx.lineTo(HALF, HALF - offset);
+                ctx.moveTo(HALF, HALF + offset);
+                ctx.lineTo(HALF, HALF + endV);
+                ctx.stroke();
+            }
+
+            // Draw colored lines on top
+            ctx.lineWidth = thickness;
+            ctx.strokeStyle = c;
+            ctx.lineCap = "square";
+            ctx.lineJoin = "bevel";
+            ctx.beginPath();
+            ctx.moveTo(HALF - endH, HALF);
+            ctx.lineTo(HALF - offset, HALF);
+            ctx.moveTo(HALF + offset, HALF);
+            ctx.lineTo(HALF + endH, HALF);
+            ctx.moveTo(HALF, HALF - endV);
+            ctx.lineTo(HALF, HALF - offset);
+            ctx.moveTo(HALF, HALF + offset);
+            ctx.lineTo(HALF, HALF + endV);
+            ctx.stroke();
+        };
+
+        // Draw outer lines first
+        if (crosshairSettings.outerLines?.enabled) {
+            drawLines(crosshairSettings.outerLines);
+        }
+
+        // Draw inner lines (appears on top of outer)
+        if (crosshairSettings.innerLines?.enabled) {
+            drawLines(crosshairSettings.innerLines);
+        }
+
+        // Center dot
+        if (crosshairSettings.centerDot?.enabled) {
+            const t = crosshairSettings.centerDot.thickness ?? 2;
+            const opacity = crosshairSettings.centerDot.opacity ?? 1;
+
+            ctx.globalAlpha = opacity;
+
+            // Draw black outline if enabled
+            if (hasOutline) {
+                ctx.fillStyle = "black";
+                ctx.fillRect(HALF - t / 2 - 1, HALF - t / 2 - 1, t + 2, t + 2);
+            }
+
+            // Draw colored dot on top
+            ctx.fillStyle = c;
+            ctx.fillRect(HALF - t / 2, HALF - t / 2, t, t);
+        }
+
+        ctx.globalAlpha = 1;
+    };
 
     const languages = {
         "English (United States)": "en-US",
@@ -117,6 +224,30 @@ export default function Settings(){
         loadSettings();
         loadShortcuts();
         
+        // Load crosshair settings
+        const loadCrosshairSettings = async () => {
+            try {
+                if (window.crosshair && window.crosshair.getSettings) {
+                    const settings = await window.crosshair.getSettings();
+                    if (isActive) {
+                        setCrosshairSettings(settings);
+                    }
+                } else {
+                    // Fallback to default if API not available
+                    if (isActive) {
+                        setCrosshairSettings(DEFAULT_CROSSHAIR);
+                    }
+                }
+            } catch (error) {
+                // Fallback to default on error
+                if (isActive) {
+                    setCrosshairSettings(DEFAULT_CROSSHAIR);
+                }
+            }
+        };
+
+        loadCrosshairSettings();
+        
         return () => {
             isActive = false;
         };
@@ -135,6 +266,21 @@ export default function Settings(){
             console.error('Failed to save sensitivity:', error);
         });
     }, [sense]);
+
+    // Draw crosshair when settings change
+    useEffect(() => {
+        redrawCrosshair();
+    }, [crosshairSettings]);
+
+    // Redraw when crosshair tab is selected
+    useEffect(() => {
+        if (selected === 2) {
+            // Give React a chance to render the tab content first
+            setTimeout(() => {
+                redrawCrosshair();
+            }, 0);
+        }
+    }, [selected]);
 
     return (
         <>
@@ -265,8 +411,10 @@ export default function Settings(){
                                                 value={bindings[0]} 
                                                 emptyLabel="none"
                                                 setValue={(newValue) => {
+                                                    console.log('[SHORTCUT SAVE] Setting', name, 'binding 0 to:', newValue);
                                                     const updated = [...bindings];
                                                     updated[0] = newValue;
+                                                    console.log('[SHORTCUT SAVE] Full updated bindings:', updated);
                                                     const newShortcuts = { ...shortcuts, [name]: updated };
                                                     setShortcuts(newShortcuts);
                                                     window.settings.set(name, updated);
@@ -278,8 +426,10 @@ export default function Settings(){
                                                 value={bindings[1]} 
                                                 emptyLabel="none"
                                                 setValue={(newValue) => {
+                                                    console.log('[SHORTCUT SAVE] Setting', name, 'binding 1 to:', newValue);
                                                     const updated = [...bindings];
                                                     updated[1] = newValue;
+                                                    console.log('[SHORTCUT SAVE] Full updated bindings:', updated);
                                                     const newShortcuts = { ...shortcuts, [name]: updated };
                                                     setShortcuts(newShortcuts);
                                                     window.settings.set(name, updated);
@@ -290,6 +440,151 @@ export default function Settings(){
                                 ))}
                             </tbody>
                         </table>
+                    }
+                    { selected == 2 &&
+                        <div className="w-full flex flex-col gap-1">
+                            <div className="w-full flex items-center justify-center relative" style={{ height: '100px' }}>
+                                <canvas 
+                                    ref={canvasRef}
+                                    width="200"
+                                    height="200"
+                                    style={{ position: 'absolute', zIndex: 20, width: '200px', height: '200px', border: 'none', outline: 'none' }}
+                                />
+                                <div className="absolute z-20 right-0 p-2 bg-[#fff4]">
+                                    <p className="text-white text-[0.8rem]">RESET CROSSHAIR TO DEFAULT</p>
+                                </div>
+                                <img className="w-full h-full object-cover" src="/assets/crosshairbg.png"></img>
+                            </div>
+                            <table>
+                                <tbody className="w-full">
+                                    <tr className="bg-[#fff1] flex w-full">
+                                        <td className="w-full flex flex-row items-center justify-center">
+                                            <div className="w-full flex grow flex-1 flex-row items-center justify-center">
+                                                <div className="grow p-2 px-4 flex flex-row">
+                                                    <p className="text-white grow">Crosshair Profile</p>
+                                                </div>
+                                                <div className="grow-1 pl-4 gap-2 flex flex-row items-center justify-center">
+                                                    <div className="p-2 bg-[#fff3] w-fit h-fit">
+                                                        <IconContext.Provider value={{ color: "#faa"}}>
+                                                            <MdOutlineDelete/>
+                                                        </IconContext.Provider>
+                                                    </div>
+                                                    <div className="w-[1px] py-1 self-stretch">
+                                                        <div className="bg-white h-full w-full"></div>
+                                                    </div>
+                                                    <div className="p-2 bg-[#fff3] w-fit h-fit">
+                                                        <IconContext.Provider value={{ color: "#fff"}}>
+                                                            <PiUploadSimple/>
+                                                        </IconContext.Provider>
+                                                    </div>
+                                                    <div className="p-2 bg-[#fff3] w-fit h-fit">
+                                                        <IconContext.Provider value={{ color: "#fff"}}>
+                                                            <PiDownloadSimple/>
+                                                        </IconContext.Provider>
+                                                    </div>
+                                                    <div className="p-2 bg-[#fff3] w-fit h-fit">
+                                                        <IconContext.Provider value={{ color: "#fff"}}>
+                                                            <MdContentCopy/>
+                                                        </IconContext.Provider>
+                                                    </div>
+                                                    <div className="p-2 bg-[#fff3] w-fit h-fit">
+                                                        <IconContext.Provider value={{ color: "#fff"}}>
+                                                            <MdEditNote/>
+                                                        </IconContext.Provider>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className="w-full flex flex-1 flex-row items-center justify-center">
+                                                {/* dropdown listing all crosshair names */}
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                            <table>
+                                <thead>
+                                    <tr className="headrow">
+                                        <th>
+                                            Crosshair
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td>
+                                            <div className="bg-[#fff1] p-4 relative">
+                                                <p className="text-white">Crosshair Color</p>
+                                            </div>
+                                        </td>
+                                        <td></td>
+                                    </tr>
+                                    <tr>
+                                        <td>
+                                            <div className="bg-[#fff1] p-4 relative">
+                                                <p className="text-white">Outlines</p>
+                                            </div>
+                                        </td>
+                                        <td></td>
+                                    </tr>
+                                    <tr>
+                                        <td>
+                                            <div className="bg-[#fff1] p-4 relative">
+                                                <p className="text-white">Outline Opacity</p>
+                                            </div>
+                                        </td>
+                                        <td></td>
+                                    </tr>
+                                    <tr>
+                                        <td>
+                                            <div className="bg-[#fff1] p-4 relative">
+                                                <p className="text-white">Outline Thickness</p>
+                                            </div>
+                                        </td>
+                                        <td></td>
+                                    </tr>
+                                    <tr>
+                                        <td>
+                                            <div className="bg-[#fff1] p-4 relative">
+                                                <p className="text-white">Center Dot</p>
+                                            </div>
+                                        </td>
+                                        <td></td>
+                                    </tr>
+                                    <tr>
+                                        <td>
+                                            <div className="bg-[#fff1] p-4 relative">
+                                                <p className="text-white">Center Dot Opacity</p>
+                                            </div>
+                                        </td>
+                                        <td></td>
+                                    </tr>
+                                    <tr>
+                                        <td>
+                                            <div className="bg-[#fff1] p-4 relative">
+                                                <p className="text-white">Center Dot Thickness</p>
+                                            </div>
+                                        </td>
+                                        <td></td>
+                                    </tr>
+                                    <tr>
+                                        <td>
+                                            <div className="bg-[#fff1] p-4 relative">
+                                                <p className="text-white">Crosshair</p>
+                                            </div>
+                                        </td>
+                                        <td></td>
+                                    </tr>
+                                    <tr>
+                                        <td>
+                                            <div className="bg-[#fff1] p-4 relative">
+                                                <p className="text-white">Crosshair</p>
+                                            </div>
+                                        </td>
+                                        <td></td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
                     }
                 </div>
             </div>

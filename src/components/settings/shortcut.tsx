@@ -42,17 +42,27 @@ export default function Shortcut({
             const isShift = e.shiftKey;
             const isAlt = e.altKey;
 
+            // Check if this is a special character that requires shift
+            // For these, we DON'T add shift as a modifier, we just record the character
+            const shiftRequiredChars = new Set([
+                '+', '_', '{', '}', '|', '~', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', 
+                ':', '<', '>', '?', '"'
+            ]);
+            const isShiftRequiredChar = shiftRequiredChars.has(e.key);
+
             // Build the key combination, excluding the platform modifier
             const keys: string[] = [];
 
             if (isMac) {
                 if (isCtrl) keys.push("ctrl");
                 if (isAlt) keys.push("alt");
-                if (isShift) keys.push("shift");
+                // Only add shift if it's NOT being used to type a special character
+                if (isShift && !isShiftRequiredChar) keys.push("shift");
             } else {
                 if (isCmd) keys.push("cmd");
                 if (isAlt) keys.push("alt");
-                if (isShift) keys.push("shift");
+                // Only add shift if it's NOT being used to type a special character
+                if (isShift && !isShiftRequiredChar) keys.push("shift");
             }
 
             // Add the actual key if it's not a modifier alone

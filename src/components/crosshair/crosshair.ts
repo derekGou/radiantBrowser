@@ -17,6 +17,8 @@ export interface CrosshairSettings {
 
     overrideFiringErrorOffset?: boolean;
 
+    overrideAllPrimaryCrosshairs?: boolean;
+
     innerLines: {
         enabled?: boolean;
         opacity?: number;
@@ -102,7 +104,7 @@ export const DEFAULT_CROSSHAIR: CrosshairSettings = {
     color: "white",
 
     outlines: {
-        enabled: false,
+        enabled: true,
         opacity: 0.5,
         thickness: 1,
     },
@@ -114,6 +116,7 @@ export const DEFAULT_CROSSHAIR: CrosshairSettings = {
     },
 
     overrideFiringErrorOffset: false,
+    overrideAllPrimaryCrosshairs: false,
 
     innerLines: {
         enabled: true,
@@ -127,7 +130,7 @@ export const DEFAULT_CROSSHAIR: CrosshairSettings = {
             multiplier: 1,
         },
         firingError: {
-            enabled: false,
+            enabled: true,
             multiplier: 1,
         },
     },
@@ -140,11 +143,11 @@ export const DEFAULT_CROSSHAIR: CrosshairSettings = {
         thickness: 2,
         offset: 10,
         movementError: {
-            enabled: false,
+            enabled: true,
             multiplier: 1,
         },
         firingError: {
-            enabled: false,
+            enabled: true,
             multiplier: 1,
         },
     },

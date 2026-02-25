@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <iostream>
 #include <atomic>
+#include <string>
 
 // VK codes for modifiers
 const int MOD_SHIFT = VK_SHIFT;
@@ -9,15 +10,32 @@ const int MOD_CTRL = VK_CONTROL;
 const int MOD_ALT = VK_MENU;
 const int MOD_WIN = VK_LWIN;
 
-std::atomic<HWND> targetWindow(nullptr);
+std::atomic<DWORD> targetPid(0);
 HHOOK hookHandle = nullptr;
 
 bool isModifierPressed(int vk) {
     return (GetAsyncKeyState(vk) & 0x8000) != 0;
 }
 
+bool isTargetWindowFocused() {
+    if (targetPid.load() == 0) return true; // If no target PID, always process
+    
+    HWND foregroundWindow = GetForegroundWindow();
+    if (foregroundWindow == nullptr) return false;
+    
+    DWORD foregroundPid = 0;
+    GetWindowThreadProcessId(foregroundWindow, &foregroundPid);
+    
+    return foregroundPid == targetPid.load();
+}
+
 LRESULT CALLBACK KeyboardHookProc(int nCode, WPARAM wParam, LPARAM lParam) {
     if (nCode == HC_ACTION && wParam == WM_KEYDOWN) {
+        // Check if our app is in focus
+        if (!isTargetWindowFocused()) {
+            return CallNextHookEx(hookHandle, nCode, wParam, lParam);
+        }
+        
         KBDLLHOOKSTRUCT* pKeyboard = reinterpret_cast<KBDLLHOOKSTRUCT*>(lParam);
         
         if (pKeyboard->vkCode == VK_ESCAPE) {
@@ -30,7 +48,7 @@ LRESULT CALLBACK KeyboardHookProc(int nCode, WPARAM wParam, LPARAM lParam) {
             if (hasShift && !hasOtherModifiers) {
                 std::cout << "Shift+Esc pressed" << std::endl;
                 std::cout.flush();
-                return 1; // Block and let Shift+Esc through
+                return CallNextHookEx(hookHandle, nCode, wParam, lParam); // Let Shift+Esc through
             } else {
                 std::cout << "ESC_PRESSED" << std::endl;
                 std::cout.flush();
@@ -62,11 +80,21 @@ void UnhookKeyboard() {
     }
 }
 
-int main() {
+int main(int argc, char* argv[]) {
     // Disable output buffering
     setvbuf(stdout, nullptr, _IONBF, 0);
     setvbuf(stderr, nullptr, _IONBF, 0);
     std::cout.sync_with_stdio(true);
+    
+    // Parse PID from command line argument
+    if (argc > 1) {
+        try {
+            targetPid.store(std::stoul(argv[1]));
+            std::cout << "Monitoring PID: " << targetPid.load() << std::endl;
+        } catch (...) {
+            std::cerr << "Invalid PID argument" << std::endl;
+        }
+    }
     
     SetupKeyboardHook();
     
@@ -82,5 +110,8 @@ int main() {
 }
 
 #else
-#error "This program can only be compiled on Windows"
+// Stub implementation for non-Windows platforms (keytap is Windows-only)
+int main() {
+    return 0;
+}
 #endif

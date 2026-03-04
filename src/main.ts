@@ -715,7 +715,7 @@ function createWindow() {
             // Defer non-critical operations
             setImmediate(() => {
                 if (isDev && isUsable(mainWindow)) {
-                    mainWindow.webContents.openDevTools()
+                    // mainWindow.webContents.openDevTools()
                 }
                 startKeytapProcess()
             })
@@ -981,6 +981,13 @@ app.whenReady().then(() => {
 })
 
 // IPC Handlers
+
+// Browser console logger
+ipcMain.on('console:log', (_, { method, args }: { method: string; args: any[] }) => {
+    const formattedArgs = args.join(' ')
+    const logMethod = (console as any)[method] as (...args: any[]) => void
+    logMethod(`[BROWSER] ${formattedArgs}`)
+})
 
 // Add this near the top with other state variables
 let activeTextInput: {
